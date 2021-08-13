@@ -243,7 +243,6 @@ function chado_get_schema_name($schema = 'chado') {
 
   // First we will set our default. This is what will be returned in most cases.
   if ($schema == 'chado') {
-
     // Currently we just return a random version of chado.
     $installed = chado_get_installed_schemas();
     if (is_array($installed) && !empty($installed)) {
@@ -260,7 +259,19 @@ function chado_get_schema_name($schema = 'chado') {
     }
   }
   else {
-    $schema_name = 'public';
+    // Get Drupal schema.
+    $connection = Drupal\Core\Database\Database::getConnection();
+    $connection_options = $connection->getConnectionOptions();
+    // Check if Drupal has been installed in a specific schema other than
+    // 'public'. If it is the case, Drupal database configuration 'prefix'
+    // parameter will containt the schema name followed by a dot.
+    if (!empty($connection_options['prefix']['default'])
+        && (FALSE !== strrpos($connection_options['prefix']['default'], '.'))) {
+      $schema_name = substr($connection_options['prefix']['default'], 0, -1);
+    }
+    else {
+      $schema_name = 'public';
+    }
   }
 
   // There are cases where modules or admin might need to change the default
