@@ -130,6 +130,9 @@ class ChadoSchema {
     }
     return $db;
   }
+  
+  // @TODO: add static method for chado_get_schema_name($schema = 'chado')
+  // We need a mecanism to know the current active Chado schema.
 
   /**
    * Get/set internal test mode.
@@ -142,9 +145,47 @@ class ChadoSchema {
    */
   public static function testMode(?bool $test_mode = NULL) {
     if (isset($test_mode)) {
-      ChadoSchema::$test_mode = $test_mode;
+      self::$test_mode = $test_mode;
     }
-    return ChadoSchema::$test_mode;
+    return self::$test_mode;
+  }
+
+  /**
+   * Generate a new test schema from a version template.
+   *
+   * If the version template does not exist, it will be created first. Then,
+   * a new clone of that template will be generated and its schema name
+   * returned.
+   *
+   * @param string $version
+   *   Version number. Currently, only '1.3' is supported.
+   *   Default: '1.3'
+   * @param integer $expiration_timestamp
+   *   The time after wich the schema can be safely removed. If not set, it will
+   *   be set to current time + 1 day.
+   *
+   * @return string
+   *   The name of the new test schema generated.
+   */
+  public static function generateTestSchema(string $version = '1.3', ?integer $expiration_timestamp = NULL) {
+    if ($version != '1.3') {
+      throw new \Exception("Invalid or unsupported Chado schema version '$version'.");
+    }
+    
+    if (!self::$test_mode) {
+      throw new \Exception("generateTestSchema() called while not in debug mode. Please call 'ChadoSchema::testMode(TRUE);' first.");
+    }
+
+    if (empty($expiration_timestamp)) {
+      // 86400 sec = 1 day
+      $expiration_timestamp = time() + 86400;
+    }
+
+
+    throw new \Exception("Not implemented.");
+    // note: an expiration date should be incorporated in order to cleanup old test
+    // schemas.
+    return;
   }
 
   /**
@@ -157,7 +198,7 @@ class ChadoSchema {
    *   A string describing the issue in the name or an empty string if the
    *   schema name is valid.
    */
-  public static function isInvalidSchemaName($schema_name) {
+  public static function isInvalidSchemaName(string $schema_name) {
 
     $issue = '';
     // Schema name must be all lowercase with no special characters with the
@@ -185,8 +226,7 @@ class ChadoSchema {
         'The "public" schema is reseved to Drupal and should not be used for Chado.'
       );
     }
-    elseif ((self::TEST_SCHEMA_NAME == $schema_name) && !ChadoSchema::$test_mode) {
-      // @todo: Should we protect the "_" prefix and not just "_chado_test"?
+    elseif ((0 === stripos($schema_name, self::TEST_SCHEMA_NAME)) && !self::$test_mode) {
       // Value of \Drupal\Tests\tripal_chado::$schemaName.
       $issue = t(
         'The "' . self::TEST_SCHEMA_NAME . '" schema name is reseved for Tripal internal uses and unit tests.'
@@ -223,7 +263,7 @@ class ChadoSchema {
    * schema and one time for the table in above examples) and it only adds quote
    * when necessary.
    */
-  public static function quotePgObjectId($object_id) {
+  public static function quotePgObjectId(string $object_id) {
     $sql = "SELECT quote_ident(:object_id) AS \"qi\";";
     $quoted_object_id = \Drupal::database()
       ->query($sql, [':object_id' => $object_id])
@@ -231,6 +271,176 @@ class ChadoSchema {
       ->qi ?: $object_id
     ;
     return $quoted_object_id;
+  }
+
+  /**
+   * Returns the size in bytes of a PostgreSQL database.
+   *
+   * @param string $db_name
+   *   The name of the database to use.
+   *
+   * @return integer
+   *   The size in bytes of the database or 0 if the size is not available.
+   */
+  public static function getDatabaseSize(string $db_name = '') {
+    $db_size = 0;
+    // Get database connection.
+    $db = self::getDatabase($db_name);
+
+    $sql_query = '
+      SELECT pg_catalog.pg_database_size(d.datname) AS "size"
+      FROM pg_catalog.pg_database d
+      WHERE d.datname = current_database();
+    ';
+    $size_data = $db->query($sql_query)->fetch();
+    if ($size_data) {
+      $db_size = $size_data->size ?: 0;
+    }
+    return $db_size;
+  }
+
+  /**
+   * Returns the size in bytes of a PostgreSQL schema.
+   *
+   * @param string $schema_name
+   *   Name of the schema.
+   * @param string $db_name
+   *   The name of the database to use.
+   *
+   * @return integer
+   *   The size in bytes of the schema or 0 if the size is not available.
+   */
+  public static function getSchemaSize(
+    string $schema_name = 'chado',
+    string $db_name = ''
+  ) {
+    $schema_size = 0;
+    // Get database connection.
+    $db = self::getDatabase($db_name);
+
+    $sql_query = "
+        SELECT
+          SUM(
+            pg_total_relation_size(
+              quote_ident(schemaname)
+              || '.'
+              || quote_ident(tablename)
+            )
+          )::BIGINT AS \"size\"
+        FROM pg_tables
+        WHERE schemaname = :schema;
+      ";
+    $size_data = $db->query($sql_query, [':schema' => $schema_name])->fetch();
+    if ($size_data) {
+      $schema_size = $size_data->size ?: 0;
+    }
+    return $schema_size;
+  }
+
+  /**
+   * Clones a schema into new (unexisting) one.
+   *
+   * The target schema must not exist.
+   *
+   * @param string $source_schema
+   *   Source schema to clone.
+   * @param string $target_schema
+   *   Destination schema that will be created and filled with a copy of
+   *   $source_schema.
+   * @param string $db_name
+   *   The name of the database to use.
+   *
+   * @return integer
+   *   The new schema size in bytes or 0 if the operation failed or the schema
+   *   to clone was empty.
+   */
+  public static function cloneSchema(
+      string $source_schema,
+      string $target_schema,
+      string $db_name = ''
+  ) {
+    // Get database connection.
+    $db = self::getDatabase($db_name);
+    // Clone schema.
+    $sql_query = "SELECT public.tripal_clone_schema('$source_schema', '$target_schema', TRUE, FALSE);";
+    $db->query($sql_query);
+    return self::getSchemaSize($target_schema, $db_name);
+  }
+
+  /**
+   * Creates the given schema.
+   *
+   * The schema to create must exist already. If an error occurs, an exception
+   * is thrown.
+   *
+   * @param string $schema_name
+   *   Name of schema to create.
+   * @param string $db_name
+   *   The name of the database to use.
+   */
+  public static function createSchema(
+      string $schema_name,
+      string $db_name = ''
+  ) {
+    // Get database connection.
+    $db = self::getDatabase($db_name);
+    
+    $schema_name_quoted = self::quotePgObjectId($schema_name);
+    // Drop schema.
+    $sql_query = "CREATE SCHEMA $schema_name_quoted;";
+    $result = $db->query($sql_query);
+  }
+
+  /**
+   * Removes the given schema.
+   *
+   * The schema to remove must exist. If an error occurs, an exception is
+   * thrown.
+   *
+   * @param string $schema_name
+   *   Name of schema to remove.
+   * @param string $db_name
+   *   The name of the database to use.
+   */
+  public static function dropSchema(
+      string $schema_name,
+      string $db_name = ''
+  ) {
+    // Get database connection.
+    $db = self::getDatabase($db_name);
+    
+    $schema_name_quoted = self::quotePgObjectId($schema_name);
+    // Drop schema.
+    $sql_query = "DROP SCHEMA $schema_name_quoted CASCADE;";
+    $result = $db->query($sql_query);
+  }
+
+  /**
+   * Renames a schema.
+   *
+   * The new schema name must not be used by an existing schema. If an error
+   * occurs, an exception is thrown.
+   *
+   * @param string $old_schema_name
+   *   Original name of the schema.
+   * @param string $new_schema_name
+   *   New name to use.
+   * @param string $db_name
+   *   The name of the database to use.
+   */
+  public static function renameSchema(
+      string $old_schema_name,
+      string $new_schema_name,
+      string $db_name = ''
+  ) {
+    // Get database connection.
+    $db = self::getDatabase($db_name);
+    $old_schema_name_quoted = self::quotePgObjectId($old_schema_name);
+    $new_schema_name_quoted = self::quotePgObjectId($new_schema_name);
+
+    // Rename schema.
+    $sql_query = "ALTER SCHEMA $old_schema_name_quoted RENAME TO $new_schema_name_quoted;";
+    $db->query($sql_query);
   }
 
   /**
@@ -242,7 +452,7 @@ class ChadoSchema {
    * @return
    *   An array with details for the current schema version.
    */
-  public static function getChadoSchemaStructure($version = '1.3') {
+  public static function getChadoSchemaDef(string $version = '1.3') {
     static $schema_structure = [];
     if (empty($schema_structure[$version])) {
       $filename =
@@ -278,12 +488,15 @@ class ChadoSchema {
    *   if the schema is not a chado schema. The returned version always starts
    *   by a number and can be tested against numeric values (ie. ">= 1.2").
    */
-  public static function getChadoVersion($schema_name, $db_name = '') {
+  public static function findSchemaChadoVersion(
+    string $schema_name = 'chado',
+    string $db_name = ''
+  ) {
     // By default, we ignore the version.
     $version = FALSE;
     
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
     
     $install_select = $db->select('chado_installations' ,'i')
       ->fields('i', ['version'])
@@ -350,7 +563,7 @@ class ChadoSchema {
         if ($prop_exists) {
           // Get it from chadoprop table.
           // First get a quoted name for query.
-          $quoted_schema_name = ChadoSchema::quotePgObjectId($schema_name);
+          $quoted_schema_name = self::quotePgObjectId($schema_name);
           $sql_query = "
             SELECT value
             FROM $quoted_schema_name.chadoprop cp
@@ -374,7 +587,7 @@ class ChadoSchema {
         // versions (https://github.com/GMOD/Chado/tree/master/chado/schemas).
         if (!$version) {
           // 'feature_organism' table added in 0.02.
-          if (ChadoSchema::checkSchemaTableExists(
+          if (self::checkSchemaTableExists(
                 'feature_organism',
                 $schema_name,
                 $db_name
@@ -384,7 +597,7 @@ class ChadoSchema {
           }
 
           // 'cv.cvname' column replaced by 'cv.name' after 0.03.
-          if (ChadoSchema::checkSchemaColumnExists(
+          if (self::checkSchemaColumnExists(
                 'cv',
                 'cvname',
                 $schema_name,
@@ -395,7 +608,7 @@ class ChadoSchema {
           }
           
           // 'feature_cvterm_dbxref' table added in 1.0.
-          if (ChadoSchema::checkSchemaTableExists(
+          if (self::checkSchemaTableExists(
                 'feature_cvterm_dbxref',
                 $schema_name,
                 $db_name
@@ -405,7 +618,7 @@ class ChadoSchema {
           }
 
           // 'cell_line' table added in 1.1-1.11.
-          if (ChadoSchema::checkSchemaTableExists(
+          if (self::checkSchemaTableExists(
                 'cell_line',
                 $schema_name,
                 $db_name
@@ -415,7 +628,7 @@ class ChadoSchema {
           }
 
           // 'cvprop' table added in 1.2-1.24.
-          if (ChadoSchema::checkSchemaTableExists(
+          if (self::checkSchemaTableExists(
                 'cvprop',
                 $schema_name,
                 $db_name
@@ -425,7 +638,7 @@ class ChadoSchema {
           }
 
           // 'analysis_cvterm' table added in 1.3-1.31.
-          if (ChadoSchema::checkSchemaTableExists(
+          if (self::checkSchemaTableExists(
                 'analysis_cvterm',
                 $schema_name,
                 $db_name
@@ -435,7 +648,7 @@ class ChadoSchema {
           }
 
           // 'featureprop.cvalue_id' column added in 1.4.
-          if (ChadoSchema::checkSchemaColumnExists(
+          if (self::checkSchemaColumnExists(
                 'featureprop',
                 'cvalue_id',
                 $schema_name,
@@ -478,12 +691,12 @@ class ChadoSchema {
    *   PostgreSQL materialized views.
    */
   public static function getSchemaTables(
-    $schema_name,
-    $include = [],
-    $db_name = ''
+    string $schema_name,
+    array $include = [],
+    string $db_name = ''
   ) {
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
 
     // No "{}" around table names as we query system tables.
     $sql_query = "
@@ -535,23 +748,29 @@ class ChadoSchema {
    *   or an empty string if the table was not found.
    */
   public static function getSchemaTableDdl(
-    $table_name,
-    $schema_name=  'chado',
-    $db_name = ''
+    string $table_name,
+    string $schema_name = 'chado',
+    string $db_name = ''
   ) {
+    static $db_ddls = [];
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
 
-    $sql_query = "SELECT public.tripal_get_table_ddl(:schema, :table, TRUE) AS \"definition\";";
-    $result = $db->query(
-        $sql_query,
-        [':schema' => $schema_name, ':table' => $table_name, ]
-    );
-    $table_raw_definition = '';
-    if ($result) {
-      $table_raw_definition = $result->fetch()->definition;
+    $cache_key = "$db_name.$schema_name.$table_name";
+    if (!isset($db_ddls[$cache_key])) {
+      $sql_query = "SELECT public.tripal_get_table_ddl(:schema, :table, TRUE) AS \"definition\";";
+      $result = $db->query(
+          $sql_query,
+          [':schema' => $schema_name, ':table' => $table_name, ]
+      );
+      $table_raw_definition = '';
+      if ($result) {
+        $table_raw_definition = $result->fetch()->definition;
+      }
+      $db_ddls[$cache_key] = $table_raw_definition;
     }
-    return $table_raw_definition;
+    
+    return $db_ddls[$cache_key];
   }
 
   /**
@@ -566,9 +785,9 @@ class ChadoSchema {
    *   [
    *     'columns' => [
    *       <column name> => [
-   *        'type'    => <column type>,
-   *        'null'    => <TRUE if column can be NULL, FALSE otherwise>,
-   *        'default' => <'DEFAULT ' followed by column default value>,
+   *        'type'     => <column type>,
+   *        'not null' => <TRUE if column cannot be NULL, FALSE otherwise>,
+   *        'default'  => <'DEFAULT ' followed by column default value>,
    *       ],
    *       ...
    *     ],
@@ -587,7 +806,7 @@ class ChadoSchema {
    *     ],
    *   ]
    */
-  public static function parseSchemaTableDdl($table_ddl) {
+  public static function parseTableDdl(string $table_ddl) {
     $table_definition = [
       'columns' => [],
       'constraints' => [],
@@ -627,9 +846,9 @@ class ChadoSchema {
       ) {
         // Column.
         $table_definition['columns'][$match[1]] = [
-          'type'    => $match[2],
-          'null'    => (FALSE === stripos($match[3], 'NOT')),
-          'default' => $match[4],
+          'type'     => $match[2],
+          'not null' => (FALSE !== stripos($match[3], 'NOT')),
+          'default'  => preg_replace('/(?:^\s+DEFAULT\s+)|(?:\s+$)/', '', $match[4]),
         ];
       }
       else {
@@ -646,7 +865,7 @@ class ChadoSchema {
       ++$i;
     }
 
-    // Parses indexes.
+    // Parses the rest (indexes and comment).
     if (++$i < count($table_raw_definition)) {
       while ($i < count($table_raw_definition)) {
         if (empty($table_raw_definition[$i])) {
@@ -680,6 +899,25 @@ class ChadoSchema {
             'using' => $match[3],
           ];
         }
+        elseif (
+          preg_match(
+            '/^\s*COMMENT\s+ON\s+TABLE\s+\S+\s+IS\s+\'((?:[^\'\\\\]|\\\\.)*)(\'\s*;\s*|)$/i',
+            $table_raw_definition[$i],
+            $match
+          )
+        ) {
+          $table_definition['comment'] = $match[1];
+          // Complete the comment if needed (multiline comments).
+          while (empty($match[2]) && ($i+1 < count($table_raw_definition))) {
+            ++$i;
+            preg_match(
+              '/^((?:[^\'\\\\]|\\\\.)*)(\'\s*;\s*|)/i',
+              $table_raw_definition[$i],
+              $match
+            );
+            $table_definition['comment'] .= "\n" . $match[1];
+          }
+        }
         else {
           // If it happens, it means the tripal_get_table_ddl() SQL function
           // changed and this script should be adapted.
@@ -697,12 +935,287 @@ class ChadoSchema {
     return $table_definition;
   }
   
-  //@TODO: add conversion from DDL to Drupal Schema API.
+  /**
+   * Retrieve table details from YAML file.
+   *
+   * @param string $table_name
+   *   Name of the table of interest.
+   * @param string $version
+   *   Version of Chado schema to fetch.
+   *
+   * @return mixed
+   *   An array with details of the table for the current schema version or
+   *   FALSE if the table is not part of Chado specifications of the given
+   *   version.
+   */
+  public static function getChadoSchemaTableDef(string $table_name, string $version = '1.3') {
+    $schema_def = self::getChadoSchemaDef($version);
+
+    if (array_key_exists($table_name, $schema_def)) {
+      return $schema_def[$table_name];
+    }
+    else {
+      return FALSE;
+    }
+  }
+
+  /**
+   * Parses a table DDL and returns a Drupal schema definition.
+   *
+   * An exception is thrown if the table is not found.
+   *
+   * @param string $table_ddl
+   *   A string containing table definition as returned by
+   *   ChadoSchema::getTableDdl().
+   *
+   * @return array
+   *   An array with details of the table reflecting what is in database.
+   */
+  public static function parseTableDdlToTableDef(string $table_ddl) {
+    $table_structure = self::parseTableDdl($table_ddl);
+    // Start with the name of the table.
+    $table_def = [];
+
+    // Description.
+    if (!empty($table_structure['comment'])) {
+      $table_def['description'] = $table_structure['comment'];
+    }
+
+    // Columns/fields:
+    $table_def['fields'] = [];
+    foreach ($table_structure['columns'] as $column => $column_def) {
+      $column_def['type'] = trim($column_def['type']);
+      $size = NULL;
+      // Check for serial.
+      if (preg_match('/^nextval\(/i', $column_def['default'])) {
+        $column_def['default'] = '';
+        if ($column_def['type'] == 'bigint') {
+          $column_def['type'] = 'bigserial';
+          $size = 'big';
+        }
+        elseif ($column_def['type'] == 'smallint') {
+          $column_def['type'] = 'smallserial';
+          $size = 'small';
+        }
+        else {
+          $column_def['type'] = 'serial';
+        }
+      }
+      // Check specified string length or precision and extract it.
+      $length = $precision = $scale = NULL;
+      if (preg_match('/\(\s*(\d+)\s*\)$/i', $column_def['type'], $match)) {
+        $length = intval($match[1]);
+        $column_def['type'] = substr(
+          $column_def['type'],
+          0,
+          strpos($column_def['type'], '(')
+        );
+      }
+      elseif (
+        preg_match(
+          '/\(\s*(\d+)\s*,\s*(\d+)\s*\)$/i',
+          $column_def['type'],
+          $match
+        )
+      ) {
+        $length = intval($match[1]);
+        $scale =  intval($match[2]);
+        $column_def['type'] = substr(
+          $column_def['type'],
+          0,
+          strpos($column_def['type'], '(')
+        );
+      }
+      // Remove extra stuff from type name.
+      $short_type = $column_def['type'];
+      $i = strpos($short_type, ' ');
+      if (FALSE !== $i) {
+        $short_type = substr($short_type, 0, $i);
+      }
+
+      // Remap types if needed.
+      // Supported types are :
+      // 'char', 'varchar', 'text', 'blob', 'int', 'float', 'numeric', 'serial'.
+      $pg_type = NULL;
+      switch ($short_type) {
+        case 'bigint':
+          $column_type = 'int';
+          $pg_type = $column_def['type'];
+          $size = 'big';
+          break;
+
+        case 'smallint':
+          $column_type = 'int';
+          $pg_type = $column_def['type'];
+          $size = 'small';
+          break;
+
+        case 'boolean':
+          $column_type = 'int';
+          $pg_type = $column_def['type'];
+          $size = 'tiny';
+          break;
+
+        case 'decimal':
+          $column_type = 'float';
+          $pg_type = $column_def['type'];
+          $precision = $length;
+          $length = NULL;
+          break;
+
+        case 'real':
+          $column_type = 'float';
+          $pg_type = $column_def['type'];
+          break;
+
+        case 'double':
+          $column_type = 'float';
+          $pg_type = $column_def['type'];
+          $size = 'big';
+          break;
+
+        case 'smallserial':
+        case 'bigserial':
+          $column_type = 'serial';
+          $pg_type = $column_def['type'];
+          break;
+
+        case 'character':
+          if (FALSE !== stripos($column_def['type'], 'var')) {
+            $column_type = 'varchar';
+          }
+          else {
+            $column_type = 'char';
+          }
+          $pg_type = $column_def['type'];
+          break;
+
+        case 'bytea':
+          $column_type = 'blob';
+          $pg_type = $column_def['type'];
+          break;
+
+        default:
+          // Date/time, money, enumerated, geometric, network address, etc.
+          $column_type = 'text';
+          $pg_type = $column_def['type'];
+          break;
+      }
+
+      $table_def['fields'][$column] = [
+        'type' => $column_type,
+        'not null' => $column_def['not null'],
+      ];
+      if (!empty($pg_type)) {
+        $table_def['fields'][$column]['pgsql_type'] = $pg_type;
+      }
+      if (!empty($length)) {
+        $table_def['fields'][$column]['length'] = $length;
+      }
+      if (!empty($size)) {
+        $table_def['fields'][$column]['size'] = $size;
+      }
+      if (!empty($precision)) {
+        $table_def['fields'][$column]['precision'] = $precision;
+      }
+      if (!empty($scale)) {
+        $table_def['fields'][$column]['scale'] = $scale;
+      }
+      if (!empty($column_def['default'])) {
+        $table_def['fields'][$column]['default'] = $column_def['default'];
+      }
+    }
+    
+    // Constraints.
+    foreach ($table_structure['constraints'] as $constraint => $cdef) {
+      $cdef = trim($cdef);
+      if (preg_match('/^PRIMARY\s+KEY\s+\((.+)\)/i', $cdef, $match)) {
+        $table_def['primary key'] = preg_split('/\s*,\s*/', $match[1]);
+      }
+      elseif (preg_match('/^UNIQUE\s+\((.+)\)/i', $cdef, $match)) {
+        if (!array_key_exists('unique keys', $table_def)) {
+          $table_def['unique keys'] = [];
+        }
+        $table_def['unique keys'][$constraint] =
+          preg_split('/\s*,\s*/', $match[1]);
+      }
+      elseif (preg_match(
+        '/
+          # Match "FOREIGN KEY ("
+          FOREIGN\s+KEY\s*\(
+             # Capture current table columns (one or more).
+            (
+              (?:[\w\$\x80-\xFF\.]+\s*,?\s*)+
+            )
+          \)\s*
+          # Match "REFERENCES"
+          REFERENCES\s*
+            # Caputre evental schema name.
+            ([\w\$\x80-\xFF]+\.|)
+            # Caputre foreign table name.
+            ([\w\$\x80-\xFF]+)\s*
+            \(
+              # Capture foreign table columns (one or more).
+              (
+                (?:[\w\$\x80-\xFF]+\s*,?\s*)+
+              )
+            \)
+        /ix',
+        $cdef,
+        $match
+      )) {
+        if (!array_key_exists('foreign keys', $table_def)) {
+          $table_def['foreign keys'] = [];
+        }
+        $table_columns =  preg_split('/\s*,\s*/', $match[1]);
+        $foreign_table_schema = $match[2];
+        $foreign_table = $match[3];
+        $foreign_table_columns =  preg_split('/\s*,\s*/', $match[4]);
+        $table_def['foreign keys'][$constraint] = [
+          'table' => $foreign_table,
+          'columns' => [],
+        ];
+        if (count($table_columns) == count($foreign_table_columns)) {
+          for ($col = 0; $col < count($table_columns); ++$col) {
+            $tcol = $table_columns[$col];
+            $ftcol = $foreign_table_columns[$col];
+            $table_def['foreign keys'][$constraint]['columns'][$tcol] = $ftcol;
+          }
+        }
+
+      }
+    }
+    return $table_def;
+  }
+
+  /**
+   * Retrieve table details from database.
+   *
+   * An exception is thrown if the table is not found.
+   *
+   * @param string $table_name
+   *   Name of the table of interest.
+   * @param string $schema_name
+   *   The name of the schema owning the table.
+   * @param string $db_name
+   *   The name of the database to use.
+   *
+   * @return array
+   *   An array with details of the table reflecting what is in database.
+   */
+  public static function getSchemaTableDef(
+    string $table_name,
+    string $schema_name= 'chado',
+    string $db_name = ''
+  ) {
+    $table_ddl = self::getSchemaTableDdl($table_name, $schema_name, $db_name);
+    return self::parseTableDdlToTableDef($table_ddl);
+  }
 
   /**
    * Check that any given chado schema exists.
    *
-   * @param string $schema
+   * @param string $schema_name
    *   The name of the schema to check the existence of.
    * @param string $db_name
    *   The name of the database to use.
@@ -710,13 +1223,16 @@ class ChadoSchema {
    * @return bool
    *   TRUE/FALSE depending upon whether or not the schema exists.
    */
-  public static function checkSchemaExists($schema_name, $db_name = '') {
+  public static function checkSchemaExists(
+    string $schema_name,
+    string $db_name = ''
+  ) {
 
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
 
     // First make sure we have a valid schema name.
-    $schema_issue = ChadoSchema::isInvalidSchemaName($schema_name);
+    $schema_issue = self::isInvalidSchemaName($schema_name);
     if ($schema_issue) {
       return FALSE;
     }
@@ -755,14 +1271,14 @@ class ChadoSchema {
    *   'VIEW') if the table exists.
    */
   public static function checkSchemaTableExists(
-    $table_name,
-    $schema_name = 'chado',
-    $db_name = ''
+    string $table_name,
+    string $schema_name = 'chado',
+    string $db_name = ''
   ) {
     static $db_tables = [];
 
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
 
     // If we've already lookup up this table then don't do it again, as
     // we don't need to keep querying the database for the same thing.
@@ -812,16 +1328,16 @@ class ChadoSchema {
    *
    * @ingroup tripal_chado_schema_api
    */
-  public static function checkSchemaTableColumnExists(
-    $table_name,
-    $column_name,
-    $schema_name = 'chado',
-    $db_name = ''
+  public static function checkSchemaColumnExists(
+    string $table_name,
+    string $column_name,
+    string $schema_name = 'chado',
+    string $db_name = ''
   ) {
     static $db_columns = [];
 
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
     
     // If we've already lookup up this table then don't do it again, as
     // we don't need to keep querying the database for the same thing.
@@ -883,17 +1399,17 @@ class ChadoSchema {
    * @ingroup tripal_chado_schema_api
    */
   public static function checkSchemaSequenceExists(
-    $table_name = NULL,
-    $column_name = NULL,
-    &$sequence_name = NULL,
-    $schema_name = 'chado',
-    $db_name = ''
+    ?string $table_name = NULL,
+    ?string $column_name = NULL,
+    ?string &$sequence_name = NULL,
+    string $schema_name = 'chado',
+    string $db_name = ''
   ) {
     static $table_column_sequence_lookup = [];
     static $db_sequences = [];
 
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
 
     // If no sequence name is provided, guess it.
     if ($sequence_name === NULL) {
@@ -984,12 +1500,12 @@ class ChadoSchema {
    *   index names.
    */
   public static function checkSchemaIndexExists(
-    $table_name,
-    &$columns = NULL,
-    $index_name = NULL,
-    $schema_name = 'chado',
-    $db_name = '',
-    $return_array = FALSE
+    string $table_name,
+    ?string &$columns = NULL,
+    ?string $index_name = NULL,
+    string $schema_name = 'chado',
+    string $db_name = '',
+    bool $return_array = FALSE
   ) {
     static $db_indexes = [];
     static $from_columns = [];
@@ -1000,7 +1516,7 @@ class ChadoSchema {
     }
 
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
 
     if (!empty($index_name)) {
       // We got an index name to check.
@@ -1161,15 +1677,15 @@ class ChadoSchema {
    * @ingroup tripal_chado_schema_api
    */
   public static function checkSchemaFunctionExists(
-    $function_name,
-    $function_parameters,
-    $schema_name = 'chado',
-    $db_name = ''
+    string $function_name,
+    string $function_parameters,
+    string $schema_name = 'chado',
+    string $db_name = ''
   ) {
     static $db_functions = [];
 
     // Get database connection.
-    $db = ChadoSchema::getDatabase($db_name);
+    $db = self::getDatabase($db_name);
 
     if (empty($function_name) || !is_array($function_parameters)) {
       throw new \Exception('Invalid parameters for checkSchemaFunctionExists().');
@@ -1232,104 +1748,154 @@ class ChadoSchema {
   }
 
   /**
-   * Return table dependencies.
-   *
-   * @TODO: migrate to Chado API
+   * Return all schema table dependencies.
    *
    * @param $chado_schema
    *   Name of the schema to process.
+   * @param string $db_name
+   *   Name of the database containing the given schema.
    *
    * @return array
-   *   first-level keys are table name, second level keys are column names,
-   *   third level keys are foreign table names and values are foreign column
+   *   First-level keys are table name, second level keys are foreign table
+   *   names, third level keys are column names and values are foreign column
    *   names.
    */
-  public static function getSchemaTableDependencies(
-    $schema_name = 'chado',
-    $db_name = ''
+  public static function getSchemaAllTableDependencies(
+    string $schema_name = 'chado',
+    string $db_name = ''
   ) {
-    $db = ChadoSchema::getDatabase($db_name);
+    static $db_dependencies = [];
 
-    // Get tables.
-    $sql_query = "
-      SELECT
-        DISTINCT c.relname, c.relkind
-      FROM
-        pg_class c
-        JOIN pg_namespace n ON (
-          n.oid = c.relnamespace
-          AND n.nspname = :schema
-        )
-      WHERE
-        c.relkind IN ('r','p')
-        AND c.relpersistence = 'p'
-      ORDER BY c.relkind DESC, c.relname
-    ";
-    $tables = $db
-      ->query($sql_query, [':schema' => $schema_name])
-      ->fetchAllAssoc('relname')
-    ;
+    $db = self::getDatabase($db_name);
 
-    $table_dependencies = [];
-    // Process all tables.
-    foreach ($tables as $table_name => $table) {
-      $table_dependencies[$table_name] = [];
+    $cache_key = "$db_name.$schema_name";
+    if (!isset($db_tables[$cache_key])) {
+      // Get tables.
+      $sql_query = "
+        SELECT
+          DISTINCT c.relname, c.relkind
+        FROM
+          pg_class c
+          JOIN pg_namespace n ON (
+            n.oid = c.relnamespace
+            AND n.nspname = :schema
+          )
+        WHERE
+          c.relkind IN ('r','p')
+          AND c.relpersistence = 'p'
+        ORDER BY c.relkind DESC, c.relname
+      ";
+      $tables = $db
+        ->query($sql_query, [':schema' => $schema_name])
+        ->fetchAllAssoc('relname')
+      ;
 
-      // Get new table definition.
-      $table_definition = ChadoSchema::parseSchemaTableDdl(
-        ChadoSchema::getSchemaTableDdl($table_name, $schema_name, $db_name)
-      );
+      $table_dependencies = [];
+      // Process all tables.
+      foreach ($tables as $table_name => $table) {
+        $table_dependencies[$table_name] = [];
 
-      // Process FK constraints.
-      $foreign_keys = [];
-      $cstr_defs = $table_definition['constraints'];
-      foreach ($cstr_defs as $constraint_name => $constraint_def) {
-        if (preg_match(
-              '/
-                # Match "FOREIGN KEY ("
-                FOREIGN\s+KEY\s*\(
-                   # Capture current table columns (one or more).
-                  (
-                    (?:[\w\$\x80-\xFF\.]+\s*,?\s*)+
-                  )
-                \)\s*
-                # Match "REFERENCES"
-                REFERENCES\s*
-                  # Caputre evental schema name.
-                  ([\w\$\x80-\xFF]+\.|)
-                  # Caputre foreign table name.
-                  ([\w\$\x80-\xFF]+)\s*
-                  \(
-                    # Capture foreign table columns (one or more).
+        // Get new table definition.
+        $table_definition = self::parseTableDdl(
+          self::getSchemaTableDdl($table_name, $schema_name, $db_name)
+        );
+
+        // Process FK constraints.
+        $foreign_keys = [];
+        $cstr_defs = $table_definition['constraints'];
+        foreach ($cstr_defs as $constraint_name => $constraint_def) {
+          if (preg_match(
+                '/
+                  # Match "FOREIGN KEY ("
+                  FOREIGN\s+KEY\s*\(
+                     # Capture current table columns (one or more).
                     (
-                      (?:[\w\$\x80-\xFF]+\s*,?\s*)+
+                      (?:[\w\$\x80-\xFF\.]+\s*,?\s*)+
                     )
-                  \)
-              /ix',
-              $constraint_def,
-              $match
-            )
-        ) {
-          $table_columns =  preg_split('/\s*,\s*/', $match[1]);
-          $foreign_table_schema = $match[2];
-          $foreign_table = $match[3];
-          $foreign_table_columns =  preg_split('/\s*,\s*/', $match[4]);
-          if (count($table_columns) != count($foreign_table_columns)) {
-            throw new \Exception("Failed to parse foreign key definition for table '$table_name':\n'$constraint_def'");
-          }
-          else {
-            for ($i = 0; $i < count($table_columns); ++$i) {
-              $table_dependencies[$table_name][$table_columns[$i]] = [
-                $foreign_table => $foreign_table_columns[$i],
-              ];
+                  \)\s*
+                  # Match "REFERENCES"
+                  REFERENCES\s*
+                    # Caputre evental schema name.
+                    ([\w\$\x80-\xFF]+\.|)
+                    # Caputre foreign table name.
+                    ([\w\$\x80-\xFF]+)\s*
+                    \(
+                      # Capture foreign table columns (one or more).
+                      (
+                        (?:[\w\$\x80-\xFF]+\s*,?\s*)+
+                      )
+                    \)
+                /ix',
+                $constraint_def,
+                $match
+              )
+          ) {
+            $table_columns =  preg_split('/\s*,\s*/', $match[1]);
+            $foreign_table_schema = $match[2];
+            $foreign_table = $match[3];
+            $foreign_table_columns =  preg_split('/\s*,\s*/', $match[4]);
+            if (count($table_columns) != count($foreign_table_columns)) {
+              throw new \Exception("Failed to parse foreign key definition for table '$table_name':\n'$constraint_def'");
+            }
+            else {
+              for ($i = 0; $i < count($table_columns); ++$i) {
+                $tcol = $table_columns[$i];
+                $ftcol = $foreign_table_columns[$i];
+                if (
+                  array_key_exists(
+                    $foreign_table,
+                    $table_dependencies[$table_name]
+                  )
+                ) {
+                  $table_dependencies[$table_name][$foreign_table][$tcol] =
+                    $ftcol;
+                }
+                else {
+                  $table_dependencies[$table_name][$foreign_table] = [
+                    $tcol => $ftcol,
+                  ];
+                }
+              }
             }
           }
         }
       }
+      $db_tables[$cache_key] = $table_dependencies;
     }
-    return $table_dependencies;
+
+    return $db_tables[$cache_key];
   }
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+  /**
+   * Return dependencies of a table.
+   *
+   * @param $table_schema
+   *   Name of the table.
+   * @param $chado_schema
+   *   Name of the schema to process.
+   * @param string $db_name
+   *   Name of the database containing the given schema.
+   *
+   * @return array
+   *   FALSE if the table was not found, an array with the following structure
+   *   otherwise :first-level keys are foreign table names, second level keys
+   *   are column names and values are foreign column names.
+   */
+  public static function getSchemaTableDependencies(
+    string $table_name,
+    string $schema_name = 'chado',
+    string $db_name = ''
+  ) {
+     $db = self::getDatabase($db_name);
+     $dependencies = self::getSchemaAllTableDependencies($schema_name, $db_name);
+     if (array_key_exists($table_name, $dependencies)) {
+        return $dependencies[$table_name];
+     }
+     else {
+       return FALSE;
+     }
+  }
+
   /**
    * The ChadoSchema constructor.
    *
@@ -1369,7 +1935,7 @@ class ChadoSchema {
 
     // Set the version of the schema.
     if ($version === NULL) {
-      $this->version = chado_get_version(TRUE, $schema_name);
+      $this->version = self::findSchemaChadoVersion($schema_name);
     }
     else {
       $this->version = $version;
@@ -1379,7 +1945,7 @@ class ChadoSchema {
     if ($schema_name === NULL) {
       $this->schema_name = 'chado';
     }
-    elseif ($schema_issue = ChadoSchema::isInvalidSchemaName($schema_name)) {
+    elseif ($schema_issue = self::isInvalidSchemaName($schema_name)) {
       $this->logger->error($schema_issue);
       return FALSE;
     }
@@ -1389,7 +1955,7 @@ class ChadoSchema {
 
     // Check functions require the chado schema be local and installed...
     // So lets check that now...
-    if (ChadoSchema::checkSchemaExists($schema_name) !== TRUE) {
+    if (self::checkSchemaExists($schema_name) !== TRUE) {
       $this->logger->error(
         'Schema must already exist and be in the same database as your
         Drupal installation.');
@@ -1449,7 +2015,6 @@ class ChadoSchema {
 
     asort($tables);
     return $tables;
-
   }
 
   /**
@@ -1750,7 +2315,7 @@ class ChadoSchema {
     //   $cached_cols = $cached_obj->data;
     //   if (is_array($cached_cols) and
     //     array_key_exists($table, $cached_cols) and
-    //     array_key_Exists($column, $cached_cols[$table])) {
+    //     array_key_exists($column, $cached_cols[$table])) {
     //     return $cached_cols[$table][$column]['exists'];
     //   }
     // }
@@ -2149,100 +2714,5 @@ class ChadoSchema {
      // Now execute it!
      return $this->connection->query($query);
    }
-
-  /**
-   * Return table dependencies.
-   *
-   * @TODO: migrate to Chado API
-   *
-   * @param $chado_schema
-   *   Name of the schema to process.
-   *
-   * @return array
-   *   first-level keys are table name, second level keys are column names,
-   *   third level keys are foreign table names and values are foreign column
-   *   names.
-   */
-  protected function getTableDependencies($chado_schema) {
-    $connection = $this->connection;
-    // Get tables.
-    $sql_query = "
-      SELECT
-        DISTINCT c.relname
-      FROM
-        pg_class c
-        JOIN pg_namespace n ON (
-          n.oid = c.relnamespace
-          AND n.nspname = :schema
-        )
-      WHERE
-        c.relkind IN ('r','p')
-        AND c.relpersistence = 'p'
-      ORDER BY c.relkind DESC, c.relname
-    ";
-    $tables = $connection
-      ->query($sql_query, [':schema' => $chado_schema])
-      ->fetchAllAssoc('relname')
-    ;
-
-    $table_dependencies = [];
-    // Process all tables.
-    foreach ($tables as $table_name => $table) {
-      $table_dependencies[$table_name] = [];
-
-      // Get new table definition.
-      $sql_query = "SELECT public.tripal_get_table_ddl('$chado_schema', '$table_name', TRUE) AS \"definition\";";
-      $table_raw_definition = explode("\n", $connection->query($sql_query)->fetch()->definition);
-      $table_definition = $this->parseSchemaTableDdl($table_raw_definition);
-
-      // Process FK constraints.
-      $foreign_keys = [];
-      $cstr_defs = $table_definition['constraints'];
-      foreach ($cstr_defs as $constraint_name => $constraint_def) {
-        if (preg_match(
-              '/
-                # Match "FOREIGN KEY ("
-                FOREIGN\s+KEY\s*\(
-                   # Capture current table columns (one or more).
-                  (
-                    (?:[\w\$\x80-\xFF\.]+\s*,?\s*)+
-                  )
-                \)\s*
-                # Match "REFERENCES"
-                REFERENCES\s*
-                  # Caputre evental schema name.
-                  ([\w\$\x80-\xFF]+\.|)
-                  # Caputre foreign table name.
-                  ([\w\$\x80-\xFF]+)\s*
-                  \(
-                    # Capture foreign table columns (one or more).
-                    (
-                      (?:[\w\$\x80-\xFF]+\s*,?\s*)+
-                    )
-                  \)
-              /ix',
-              $constraint_def,
-              $match
-            )
-        ) {
-          $table_columns =  preg_split('/\s*,\s*/', $match[1]);
-          $foreign_table_schema = $match[2];
-          $foreign_table = $match[3];
-          $foreign_table_columns =  preg_split('/\s*,\s*/', $match[4]);
-          if (count($table_columns) != count($foreign_table_columns)) {
-            throw new \Exception("Failed to parse foreign key definition for table '$table_name':\n'$constraint_def'");
-          }
-          else {
-            for ($i = 0; $i < count($table_columns); ++$i) {
-              $table_dependencies[$table_name][$table_columns[$i]] = [
-                $foreign_table => $foreign_table_columns[$i],
-              ];
-            }
-          }
-        }
-      }
-    }
-    return $table_dependencies;
-  }
 
 }

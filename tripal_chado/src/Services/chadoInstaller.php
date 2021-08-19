@@ -99,18 +99,6 @@ class chadoInstaller extends bulkPgSchemaInstaller {
   }
 
   /**
-   * Updates chado in the specified schema.
-   *
-   * @param float $version
-   *   The version of chado you would like to update to.
-   */
-  public function update($version) {
-    $this->newVersion = $version;
-
-    // @todo implement update.
-  }
-
-  /**
    * Applies the table definition SQL files.
    *
    * @param float $version

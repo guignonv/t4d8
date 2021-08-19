@@ -8,6 +8,7 @@
  * @ingroup tripal_chado
  */
 use Drupal\Core\Database\Database;
+use Drupal\tripal_chado\api\ChadoSchema;
 
 /**
  * @defgroup tripal_chado_schema_api Chado Schema
@@ -52,17 +53,7 @@ use Drupal\Core\Database\Database;
  * @ingroup tripal_chado_schema_api
  */
 function chado_table_exists($table, $chado_schema = NULL) {
-
-  // Retrieve the default name of the chado schema if it's not provided.
-  if ($chado_schema === NULL) {
-    $chado_schema = chado_get_schema_name('chado');
-  }
-
-  // VALIDATION: Schema name validated in ChadoSchema Contructor.
-
-  // Create a new ChadoSchema instance and use it to check the table exists.
-  $schema = new \Drupal\tripal_chado\api\ChadoSchema(NULL, $chado_schema);
-  return $schema->checkTableExists($table);
+  return ChadoSchema::checkSchemaTableExists($table, $chado_schema);
 }
 
 /**
@@ -85,17 +76,7 @@ function chado_table_exists($table, $chado_schema = NULL) {
  * @ingroup tripal_chado_schema_api
  */
 function chado_column_exists($table, $column, $chado_schema = NULL) {
-
-  // Retrieve the default name of the chado schema if it's not provided.
-  if ($chado_schema === NULL) {
-    $chado_schema = chado_get_schema_name('chado');
-  }
-
-  // VALIDATION: Schema name validated in ChadoSchema Contructor.
-
-  // Create a new ChadoSchema instance and use it to check the column exists.
-  $schema = new \Drupal\tripal_chado\api\ChadoSchema(NULL, $chado_schema);
-  return $schema->checkColumnExists($table, $column);
+  return ChadoSchema::checkSchemaTableColumnExists($table, $column, $chado_schema);
 }
 
 /**
@@ -115,17 +96,7 @@ function chado_column_exists($table, $column, $chado_schema = NULL) {
  * @ingroup tripal_chado_schema_api
  */
 function chado_sequence_exists($sequence, $chado_schema = NULL) {
-
-    // Retrieve the default name of the chado schema if it's not provided.
-    if ($chado_schema === NULL) {
-      $chado_schema = chado_get_schema_name('chado');
-    }
-
-    // VALIDATION: Schema name validated in ChadoSchema Contructor.
-
-    // Create a new ChadoSchema instance and use it to check the column exists.
-    $schema = new \Drupal\tripal_chado\api\ChadoSchema(NULL, $chado_schema);
-    return $schema->checkSequenceExists(NULL, NULL, $sequence);
+  return ChadoSchema::checkSchemaSequenceExists(NULL, NULL, $sequence, $chado_schema);
 }
 
 /**
@@ -143,17 +114,13 @@ function chado_sequence_exists($sequence, $chado_schema = NULL) {
  * @ingroup tripal_chado_schema_api
  */
 function chado_index_exists($table, $name, $no_suffix = FALSE, $chado_schema = NULL) {
-
-  // Retrieve the default name of the chado schema if it's not provided.
-  if ($chado_schema === NULL) {
-    $chado_schema = chado_get_schema_name('chado');
+  if ($no_suffix) {
+    $indexname = strtolower($table . '_' . $name);
   }
-
-  // VALIDATION: Schema name validated in ChadoSchema Contructor.
-
-  // Create a new ChadoSchema instance and use it to check if the index exists.
-  $schema = new \Drupal\tripal_chado\api\ChadoSchema(NULL, $chado_schema);
-  return $schema->checkIndexExists($table, $name, $no_suffix);
+  else {
+    $indexname = strtolower($table . '_' . $name . '_idx');
+  }
+  return ChadoSchema::checkSchemaIndexExists($table, NULL, $indexname, $chado_schema);
 }
 
 /**
@@ -200,7 +167,7 @@ function chado_add_index($table, $name, $fields, $chado_schema = NULL) {
  */
 function chado_is_invalid_schema_name($chado_schema) {
   // Check if the schema name is correct or not.
-  return \Drupal\tripal_chado\api\ChadoSchema::isInvalidSchemaName($chado_schema);
+  return ChadoSchema::isInvalidSchemaName($chado_schema);
 }
 
 /**
@@ -215,16 +182,7 @@ function chado_is_invalid_schema_name($chado_schema) {
  * @ingroup tripal_chado_schema_api
  */
 function chado_dbschema_exists($chado_schema) {
-
-  // Retrieve the default name of the chado schema if it's not provided.
-  if ($chado_schema === NULL) {
-    $chado_schema = chado_get_schema_name('chado');
-  }
-
-  // VALIDATION: Schema name validated in ChadoSchema Contructor.
-
-  // Create a new ChadoSchema instance and use it to check if the index exists.
-  return \Drupal\tripal_chado\api\ChadoSchema::schemaExists($chado_schema);
+  return ChadoSchema::checkSchemaExists($chado_schema);
 }
 
 /**
@@ -446,7 +404,7 @@ function chado_is_local($force_recheck = FALSE, $chado_schema = NULL) {
   // VALIDATION: Schema name validated in ChadoSchema Contructor.
 
   // Create a new ChadoSchema instance and use it to check if the index exists.
-  return \Drupal\tripal_chado\api\ChadoSchema::schemaExists($chado_schema);
+  return ChadoSchema::checkSchemaExists($chado_schema);
 }
 
 /**
@@ -471,7 +429,7 @@ function chado_is_installed($chado_schema = NULL) {
   // VALIDATION: Schema name validated in ChadoSchema Contructor.
 
   // Create a new ChadoSchema instance and use it to check if the index exists.
-  return \Drupal\tripal_chado\api\ChadoSchema::schemaExists($chado_schema);
+  return ChadoSchema::checkSchemaExists($chado_schema);
 }
 
 /**
@@ -709,7 +667,6 @@ function chado_get_base_tables($chado_schema = NULL) {
   $chado_schema = new \Drupal\tripal_chado\api\ChadoSchema(NULL, $chado_schema);
   return $chado_schema->getBaseTables();
 }
-
 
 /**
  * Get information about which Chado base table a cvterm is mapped to.

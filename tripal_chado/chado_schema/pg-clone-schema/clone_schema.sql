@@ -55,6 +55,9 @@ $$
     v_indexrec record;
     v_primary boolean := False;
     v_constraint_name text;
+
+    -- table comment
+    ocomment text;
   BEGIN
     -- grab the oid of the table; https://www.postgresql.org/docs/8.3/catalog-pg-class.html
     SELECT c.oid INTO v_table_oid
@@ -69,7 +72,7 @@ $$
     IF (v_table_oid IS NULL) THEN
       RAISE EXCEPTION 'table does not exist';
     END IF;
-
+    
     -- start the create definition
     v_table_ddl := 'CREATE TABLE ' || in_schema || '.' || in_table || ' (' || E'\n';
 
@@ -152,6 +155,14 @@ $$
         || v_indexrec.indexdef
         || ';' || E'\n';
     END LOOP;
+
+    -- get table comment
+    SELECT obj_description(v_table_oid) INTO ocomment;
+    IF (ocomment IS NOT NULL) THEN
+      v_table_ddl := v_table_ddl
+        || 'COMMENT ON TABLE ' || in_schema || '.' || in_table || ' IS ' || quote_literal(ocomment)
+        || ';' || E'\n';
+    END IF;
 
     -- return the ddl
     RETURN v_table_ddl;
