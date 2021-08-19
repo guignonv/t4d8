@@ -115,7 +115,7 @@ class ChadoSchema {
    * @return \Drupal\Core\Database\Connection
    *   A Drupal database connection object.
    */
-  protected static function getDatabase(&$db_name) {
+  public static function getDatabase(&$db_name) {
     $default_db_name = \Drupal::database()->getConnectionOptions()['database'];
     if (empty($db_name)
         || ('default' == $db_name)
@@ -131,8 +131,133 @@ class ChadoSchema {
     return $db;
   }
   
+  /**
+   * Get direct PostgreSQL database connection resource.
+   *
+   * @param string &$db_name
+   *   The name of the database. If empty, it will be set to 'default'.
+   *
+   * @return resource
+   *   A PostgreSQL database connection resource or FALSE on failure.
+   */
+  public static function getPgConnection(&$db_name) {
+    // Get database.
+    $db = self::getDatabase($db_name);
+    // Get connection details.
+    $databases = $db->getConnectionOptions();
+    $dsn = sprintf(
+      'dbname=%s host=%s port=%s user=%s password=\'%s\'',
+      $databases['database'],
+      $databases['host'],
+      $databases['port'],
+      $databases['username'],
+      str_replace(["'", "\\"], ["\\'", "\\\\"], $databases['password'])
+    );
+
+    // Open a PHP connection to the database
+    // since Drupal restricts us to a single statement per exec.
+    return pg_connect($dsn);
+  }
+  
+  /**
+   * Get Drupal schema name.
+   *
+   * @return string
+   *   The name of the PostgreSQL schema used by Drupal installation.
+   */
+  public static function getDrupalSchema() {
+    // Get Drupal schema name.
+    $db_name = 'default';
+    $db = self::getDatabase($db_name);
+    $connection_options = $db->getConnectionOptions();
+    // Check if Drupal has been installed in a specific schema other than
+    // 'public'. If it is the case, Drupal database configuration 'prefix'
+    // parameter will containt the schema name followed by a dot.
+    if (!empty($connection_options['prefix']['default'])
+        && (FALSE !== strrpos($connection_options['prefix']['default'], '.'))) {
+      $schema_name = substr($connection_options['prefix']['default'], 0, -1);
+    }
+    else {
+      $schema_name = 'public';
+    }
+    return $schema_name;
+  }
+
   // @TODO: add static method for chado_get_schema_name($schema = 'chado')
   // We need a mecanism to know the current active Chado schema.
+  
+  /**
+   * Get the list of available Chado instances.
+   *
+   * This function returns both Chado schema integrated with Tripal and free
+   * Chado schemas.
+   *
+   * @param string $db_name
+   *   The name of the database to use.
+   *
+   * @return array
+   *   An array of available schema keyed by schema name and having the
+   *   following structure:
+   *   "schema_name": name of the schema (same as the key);
+   *   "version": detected version of Chado;
+   *   "is_test": TRUE if it is a test schema and FALSE otherwise;
+   *   "has_data": TRUE if the schema contains more than just default records;
+   *   "size": size of the schema in bytes;
+   *   "is_integrated": FALSE if not integrated with Tripal and an array
+   *     otherwise with the following fields: 'install_id', 'schema_name',
+   *     'version', 'created', 'updated'.
+   */
+  public static function getChadoInstances(string $db_name = '') {
+    $chado_schemas = [];
+
+    $db = self::getDatabase($db_name);
+
+    // First we get a list of available schemas excluding obvious non-chado
+    // schemas.
+    // Here we did not escape schemata table using curly braces because it is a
+    // PostgreSQL system table (information_schema) and it should not be processed
+    // by Drupal.
+    $sql_query = "
+      SELECT schema_name AS \"name\"
+      FROM information_schema.schemata
+      WHERE
+        schema_name NOT IN ('information_schema', 'public', 'pg_catalog');
+    ";
+    $schemas = $db->query($sql_query)->fetchAll();
+    
+    // Then we get schema part of Tripal.
+    $integrated_schemas = $db
+      ->select('chado_installations' ,'i')
+      ->fields(
+        'i',
+        ['install_id', 'schema_name', 'version', 'created', 'updated']
+      )
+      ->execute()
+      ->fetchAllAssoc('schema_name')
+    ;
+
+    foreach ($schemas as $schema) {
+      $version = self::findSchemaChadoVersion($schema->name, $db_name);
+      if (FALSE !== $version) {
+        // Get size.
+        $schema_size = self::getSchemaSize($schema->name, $db_name);
+        $has_data = (8388608 < $schema_size);
+        // Check if part of Tripal.
+        $integration = $integrated_schemas[$schema->name] ?? FALSE;
+        // Add schema to available Chado schema list.
+        $chado_schemas[$schema->name] = [
+          'schema_name' => $schema->name,
+          'version'     => $version,
+          'is_test'     => (0 === strpos($schema->name, self::TEST_SCHEMA_NAME)),
+          'has_data'    => $has_data,
+          'size'        => $schema_size,
+          'integration' => $integration,
+        ];
+      }
+    }
+
+    return $chado_schemas;
+  }
 
   /**
    * Get/set internal test mode.
@@ -167,7 +292,10 @@ class ChadoSchema {
    * @return string
    *   The name of the new test schema generated.
    */
-  public static function generateTestSchema(string $version = '1.3', ?integer $expiration_timestamp = NULL) {
+  public static function generateTestSchema(
+    string $version = '1.3',
+    ?integer $expiration_timestamp = NULL
+  ) {
     if ($version != '1.3') {
       throw new \Exception("Invalid or unsupported Chado schema version '$version'.");
     }
@@ -181,11 +309,132 @@ class ChadoSchema {
       $expiration_timestamp = time() + 86400;
     }
 
-
     throw new \Exception("Not implemented.");
     // note: an expiration date should be incorporated in order to cleanup old test
     // schemas.
     return;
+  }
+
+  /**
+   * Execute all the given SQL statements into the given schema.
+   *
+   * For security reasons, only trusted SQL statments should be provided to this
+   * method. No user-provided queries should be able, in any way, to reach to
+   * this method. Use this method with caution.
+   *
+   * @param string $sql_queries
+   *   A list of SQL queries to execute.
+   * @param bool $force_search_path
+   *   Remove any "SET search_path" from the SQL queries provided.
+   *   Default: FALSE.
+   * @param string $schema_name
+   *   A schema on which queries should be applied to. If set, the query
+   *   "SET search_path = $schema_name;" will be executed before running the
+   *   given SQL queries. The previous search_path is saved and restored when
+   *   the SQL queries are done (w/ or w/o failure).
+   * @param string $db_name
+   *   The name of the database to use.
+   *
+   * @return bool
+   *   Whether the application succeeded.
+   */
+  public static function executeSqlQueries(
+    string $sql_queries,
+    bool $force_search_path = FALSE,
+    string $schema_name = 'chado',
+    string $db_name = ''
+  ) {
+    // We use PG direct connection in order to run multiple queries. Drupal
+    // built-in query system prevents us from running complex queries with ';'.
+    // Security: No user provided script should be run using this function.
+    // Get database connection.
+    $pgconnection = self::getPgConnection($db_name);
+
+    // Save previous search_path.
+    $old_search_path = '';
+    if (!empty($schema_name)) {
+      // Make sure the given schema exists first.
+      if (!self::checkSchemaExists($schema_name, $db_name)) {
+        return FALSE;
+      }
+      $sql_query = "SELECT setting FROM pg_settings WHERE name = 'search_path';";
+      $result = pg_query($pgconnection, $sql_query);
+      if (!$result) {
+        return FALSE;
+      }
+      $old_search_path = pg_fetch_row($result)[0] ?: "''";
+    }
+
+    $success = TRUE;
+    try {
+      // Remove any search_path commands (not commented).
+      if ($force_search_path) {
+        $sql_queries = preg_replace(
+          '/^(?:(?!\s*--)[^;]*;)*\s*SET\s*search_path\s*=\s*(?:[^;]+)\s*;/im',
+          '',
+          $sql_queries
+        );
+      }
+
+      // Prepend search path to the queries.
+      $quoted_schema_name = self::quotePgObjectId($schema_name);
+      if (!empty($schema_name)) {
+        $sql_queries = "SET search_path = " . $quoted_schema_name . ";\n" . $sql_queries;
+      }
+
+      // Apply the SQL to the database.
+      $success = pg_query($pgconnection, $sql_queries);
+    }
+    catch (Exception $e) {
+      $success = FALSE;
+    }
+
+    // Restore previous search_path.
+    if (!empty($schema_name)) {
+      $sql_query = "SET search_path = " . $old_search_path . ";";
+      pg_query($pgconnection, $sql_query);
+    }
+
+    return $success;
+  }
+
+  /**
+   * Execute all the given SQL statements into the given schema.
+   *
+   * For security reasons, only trusted SQL statments should be provided to this
+   * method. No user-provided queries should be able, in any way, to reach to
+   * this method. Use this method with caution.
+   *
+   * @param string $sql_queries
+   *   A list of SQL queries to execute.
+   * @param bool $force_search_path
+   *   Remove any "SET search_path" from the SQL queries provided.
+   *   Default: FALSE.
+   * @param string $schema_name
+   *   A schema on which queries should be applied to. If set, the query
+   *   "SET search_path = $schema_name;" will be executed before running the
+   *   given SQL queries. The previous search_path is saved and restored when
+   *   the SQL queries are done (w/ or w/o failure).
+   * @param string $db_name
+   *   The name of the database to use.
+   *
+   * @return bool
+   *   Whether the application succeeded.
+   */
+  public static function executeSqlFile(
+    string $sql_file_path,
+    bool $force_search_path = FALSE,
+    string $schema_name = 'chado',
+    string $db_name = ''
+  ) {
+    // Retrieve the SQL file.
+    $sql_queries = file_get_contents($sql_file);
+    return self::executeSqlQueries(
+      $sql_queries,
+      $force_search_path,
+      $schema_name,
+      $db_name
+    );
   }
 
   /**
@@ -1205,7 +1454,7 @@ class ChadoSchema {
    */
   public static function getSchemaTableDef(
     string $table_name,
-    string $schema_name= 'chado',
+    string $schema_name = 'chado',
     string $db_name = ''
   ) {
     $table_ddl = self::getSchemaTableDdl($table_name, $schema_name, $db_name);
@@ -1392,7 +1641,7 @@ class ChadoSchema {
    * @param string $db_name
    *   The name of the database to use.
    *
-   * @return boolean
+   * @return bool
    *   TRUE if the seqeuence exists in the chado schema and FALSE if it does
    *   not.
    *
@@ -1671,7 +1920,7 @@ class ChadoSchema {
    * @param string $db_name
    *   The name of the database to use.
    *
-   * @return boolean
+   * @return bool
    *   TRUE if the function exists in the schema and FALSE otherwise.
    *
    * @ingroup tripal_chado_schema_api
