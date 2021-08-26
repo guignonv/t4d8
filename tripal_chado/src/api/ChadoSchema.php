@@ -276,46 +276,6 @@ class ChadoSchema {
   }
 
   /**
-   * Generate a new test schema from a version template.
-   *
-   * If the version template does not exist, it will be created first. Then,
-   * a new clone of that template will be generated and its schema name
-   * returned.
-   *
-   * @param string $version
-   *   Version number. Currently, only '1.3' is supported.
-   *   Default: '1.3'
-   * @param integer $expiration_timestamp
-   *   The time after wich the schema can be safely removed. If not set, it will
-   *   be set to current time + 1 day.
-   *
-   * @return string
-   *   The name of the new test schema generated.
-   */
-  public static function generateTestSchema(
-    string $version = '1.3',
-    ?integer $expiration_timestamp = NULL
-  ) {
-    if ($version != '1.3') {
-      throw new \Exception("Invalid or unsupported Chado schema version '$version'.");
-    }
-    
-    if (!self::$test_mode) {
-      throw new \Exception("generateTestSchema() called while not in debug mode. Please call 'ChadoSchema::testMode(TRUE);' first.");
-    }
-
-    if (empty($expiration_timestamp)) {
-      // 86400 sec = 1 day
-      $expiration_timestamp = time() + 86400;
-    }
-
-    throw new \Exception("Not implemented.");
-    // note: an expiration date should be incorporated in order to cleanup old test
-    // schemas.
-    return;
-  }
-
-  /**
    * Execute all the given SQL statements into the given schema.
    *
    * For security reasons, only trusted SQL statments should be provided to this
