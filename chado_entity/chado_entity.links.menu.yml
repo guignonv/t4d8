@@ -1,0 +1,9 @@
+entity.chado_entity.collection:
+  title: 'Chado Entity'
+  route_name: entity.chado_entity.collection
+  description: 'List Chado entities'
+chado_entity.admin.structure.settings:
+  title: 'Chado entity settings'
+  description: 'Configure Chado entity'
+  route_name:  chado_entity.chado_entity_settings
+  parent: system.admin_structure

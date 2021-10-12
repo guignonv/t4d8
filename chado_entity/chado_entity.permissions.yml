@@ -1,0 +1,10 @@
+'delete chado entity':
+  title: Delete Chado entity content.
+'add chado entity':
+  title: Add Chado entity content
+'view chado entity':
+  title: View Chado entity content
+'edit chado entity':
+  title: Edit Chado entity content
+'administer chado entity':
+  title: Administer Chado entity settings

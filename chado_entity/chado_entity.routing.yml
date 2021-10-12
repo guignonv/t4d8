@@ -1,0 +1,47 @@
+entity.chado_entity.canonical:
+  path: '/stock/{chado_entity}'
+  defaults:
+    _entity_view: 'chado_entity'
+    _title: 'Chado entity content'
+  requirements:
+    _entity_access: 'chado_entity.view'
+
+entity.chado_entity.collection:
+  path: '/stock/list'
+  defaults:
+    _entity_list: 'chado_entity'
+    _title: 'Chado entity list'
+  requirements:
+    _permission: 'view chado entity'
+
+chado_entity.chado_entity_add:
+  path: '/stock/add'
+  defaults:
+    _entity_form: chado_entity.default
+    _title: 'Add a Chado entity'
+  requirements:
+    _entity_create_access: 'chado_entity'
+
+entity.chado_entity.edit_form:
+  path: '/stock/{chado_entity}/edit'
+  defaults:
+    _entity_form: chado_entity.default
+    _title: 'Edit Chado entity'
+  requirements:
+    _entity_access: 'chado_entity.update'
+
+entity.chado_entity.delete_form:
+  path: '/stock/{chado_entity}/delete'
+  defaults:
+    _entity_form: chado_entity.delete
+    _title: 'Delete Chado entity'
+  requirements:
+    _entity_access: 'chado_entity.delete'
+
+chado_entity.chado_entity_settings:
+  path: '/admin/structure/chado_entity_settings'
+  defaults:
+    _form: '\Drupal\chado_entity\Form\ChadoEntitySettingsForm'
+    _title: 'Chado entity settings'
+  requirements:
+    _permission: 'administer chado entity'

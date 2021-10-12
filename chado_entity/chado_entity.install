@@ -1,0 +1,15 @@
+<?php
+
+
+// /**
+//  * Implements hook_uninstall().
+//  */
+// function chado_entity_uninstall() {
+// }
+
+// /**
+//  * Implements hook_schema().
+//  */
+// function chado_entity_schema() {
+//   return [];
+// }

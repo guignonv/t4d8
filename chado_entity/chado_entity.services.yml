@@ -1,0 +1,6 @@
+services:
+  chado_entity.database.entity.query.sql:
+    class: Drupal\Core\Entity\Query\Sql\QueryFactory
+    arguments: ['@tripal_chado.database']
+    tags:
+      - { name: backend_overridable }

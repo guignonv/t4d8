@@ -1,0 +1,9 @@
+name: Chado Entity
+type: module
+description: Entity that represents a Chado record.
+package: Tripal
+core_version_requirement: ^8.8 || ^9
+# These modules are required by the tests, must be available at bootstrap time
+dependencies:
+  - drupal:tripal_biodb
+  - drupal:node

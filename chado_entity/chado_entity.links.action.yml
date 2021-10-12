@@ -1,0 +1,7 @@
+chado_entity.chado_entity_add:
+  route_name: chado_entity.chado_entity_add
+  title: 'Add a Chado Entity'
+
+  appears_on:
+    - entity.chado_entity.collection
+    - entity.chado_entity.canonical
