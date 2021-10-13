@@ -72,7 +72,7 @@ class StockPropWidgetType extends WidgetBase {
       '#title_display' => 'before',
       '#type' => 'number',
       '#min' => 0,
-      '#default_value' => 1,
+      '#default_value' => isset($items[$delta]->type_id) ? $items[$delta]->type_id : 1,
       '#required' => TRUE,
       '#description' => $this->t('CV term identifier (cvterm_id) defining the type of this property.'),
     ];
@@ -92,7 +92,7 @@ class StockPropWidgetType extends WidgetBase {
       '#title_display' => 'before',
       '#type' => 'number',
       '#min' => 0,
-      '#default_value' => 0,
+      '#default_value' => isset($items[$delta]->rank) ? $items[$delta]->rank : 0,
       '#required' => FALSE,
       '#description' => $this->t('Rank used to sort properties.'),
     ];

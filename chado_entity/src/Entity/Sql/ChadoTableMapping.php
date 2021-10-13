@@ -18,7 +18,7 @@ class ChadoTableMapping extends DefaultTableMapping {
   */
   public function getDedicatedDataTableName(FieldStorageDefinitionInterface $storage_definition, $is_deleted = FALSE) {
     $table_name = parent::getDedicatedDataTableName($storage_definition, $is_deleted);
-    \Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::getDedicatedDataTableName $table_name"); //+debug
+//    \Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::getDedicatedDataTableName $table_name"); //+debug
     return $table_name;
   }
 
@@ -26,8 +26,39 @@ class ChadoTableMapping extends DefaultTableMapping {
    *
    */
   protected function generateFieldTableName(FieldStorageDefinitionInterface $storage_definition, $revision) {
-    $table_name = parent::generateFieldTableName($storage_definition, $revision);
-    \Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::generateFieldTableName $table_name"); //+debug
+    // $table_name = parent::generateFieldTableName($storage_definition, $revision);
+    // \Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::generateFieldTableName $table_name"); //+debug
+    // return $table_name;
+
+//    \Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::generateFieldTableName"); //+debug
+    // The maximum length of an entity type ID is 32 characters.
+    $entity_type_id = substr($storage_definition
+      ->getTargetEntityTypeId(), 0, EntityTypeInterface::ID_MAX_LENGTH);
+    $separator = $revision ? '_revision__' : '__';
+    // $table_name = $this->prefix . $entity_type_id . $separator . $storage_definition->getName();
+    $table_name = str_replace('field_', '', $storage_definition->getName());
+
+    // Limit the string to 48 characters, keeping a 16 characters margin for db
+    // prefixes.
+    if (strlen($table_name) > 48) {
+
+      // Use a shorter separator and a hash of the field storage unique
+      // identifier.
+      $separator = $revision ? '_r__' : '__';
+      $field_hash = substr(hash('sha256', $storage_definition
+        ->getUniqueStorageIdentifier()), 0, 10);
+      $table_name = $this->prefix . $entity_type_id . $separator . $field_hash;
+
+      // If the resulting table name is still longer than 48 characters, use the
+      // following pattern:
+      // - prefix: max 34 chars;
+      // - separator: max 4 chars;
+      // - field_hash: max 10 chars.
+      if (strlen($table_name) > 48) {
+        $prefix = substr($this->prefix, 0, 34);
+        $table_name = $prefix . $separator . $field_hash;
+      }
+    }
     return $table_name;
   }
   
@@ -50,7 +81,7 @@ class ChadoTableMapping extends DefaultTableMapping {
   public static function create(ContentEntityTypeInterface $entity_type, array $storage_definitions, $prefix = '') {
     // $table_mapping = parent::create($entity_type, $storage_definitions, $prefix);
     // return $table_mapping;
-    \Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::create"); //+debug
+    //\Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::create"); //+debug
     $table_mapping = new static($entity_type, $storage_definitions, $prefix);
     $revisionable = $entity_type
       ->isRevisionable();
@@ -178,7 +209,7 @@ class ChadoTableMapping extends DefaultTableMapping {
       'stock_id',
     ];
     foreach ($dedicated_table_definitions as $field_name => $definition) {
-\Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::create field_name $field_name"); //+debug
+//\Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::create field_name $field_name"); //+debug
       $tables = [
         $table_mapping
           ->getDedicatedDataTableName($definition),
@@ -205,7 +236,7 @@ class ChadoTableMapping extends DefaultTableMapping {
    * {@inheritdoc}
    */
   public function getFieldColumnName(FieldStorageDefinitionInterface $storage_definition, $property_name) {
-\Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName property_name:' . $property_name, \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
+// \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName property_name:' . $property_name, \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
 // \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName field_name:' . $field_name, \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
 // \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName FSD:' . print_r($storage_definition, TRUE), \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
 
@@ -213,7 +244,7 @@ class ChadoTableMapping extends DefaultTableMapping {
     if (!is_a($storage_definition, \Drupal\field\Entity\FieldStorageConfig::class)
         || ($storage_definition->get('module') != 'stockprop_field')
     ) {
-      \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName parent', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
+//      \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName parent', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
       return parent::getFieldColumnName($storage_definition, $property_name);
     }
 //  \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName module:' . $storage_definition->get('module'), \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
@@ -224,25 +255,26 @@ if ('entity_id' == $property_name) {
 }
 
     if ($this->allowsSharedTableStorage($storage_definition)) {
-\Drupal::messenger()->addMessage('DEBUG 0', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
+//\Drupal::messenger()->addMessage('DEBUG 0', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
       $column_name = count($storage_definition->getColumns()) == 1 ? $field_name : $field_name . '__' . $property_name;
     }
     elseif ($this
       ->requiresDedicatedTableStorage($storage_definition)
     ) {
-\Drupal::messenger()->addMessage('DEBUG 1', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
+//\Drupal::messenger()->addMessage('DEBUG 1', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
       if ($property_name == TableMappingInterface::DELTA) {
         $column_name = 'delta';
       }
       else {
-        $column_name = !in_array($property_name, $this
-          ->getReservedColumns()) ? $field_name . '_' . $property_name : $property_name;
+        // $column_name = !in_array($property_name, $this
+        //   ->getReservedColumns()) ? $field_name . '_' . $property_name : $property_name;
+        $column_name = $property_name;
       }
     }
     else {
       throw new SqlContentEntityStorageException("Column information not available for the '{$field_name}' field.");
     }
-\Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName column_name:' . $column_name, \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
+//\Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName column_name:' . $column_name, \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
     return $column_name;
   }
 }

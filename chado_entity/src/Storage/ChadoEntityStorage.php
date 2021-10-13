@@ -3,6 +3,7 @@
 namespace Drupal\chado_entity\Storage;
 
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
+use Drupal\Core\Entity\Sql\SqlContentEntityStorageSchema;
 use Drupal\chado_entity\Entity\Sql\ChadoTableMapping;
 use Drupal\Core\Entity\Sql\TableMappingInterface;
 use Drupal\Core\Cache\CacheBackendInterface;
@@ -74,7 +75,7 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
    * {@inheritdoc}
    */
   public function getCustomTableMapping(ContentEntityTypeInterface $entity_type, array $storage_definitions, $prefix = '') {
-    \Drupal::messenger()->addMessage('DEBUG ChadoEntityStorage::getCustomTableMapping'); //+debug
+//    \Drupal::messenger()->addMessage('DEBUG ChadoEntityStorage::getCustomTableMapping'); //+debug
     // $table_mapping = parent::getCustomTableMapping($entity_type, $storage_definitions, $prefix);
     $prefix = $prefix ?: ($this->temporary ? 'tmp_' : '');
     // return DefaultTableMapping::create($entity_type, $storage_definitions, $prefix);

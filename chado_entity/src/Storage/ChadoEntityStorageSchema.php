@@ -318,6 +318,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
     $schema = $this->getEntitySchema($entity_type, TRUE);
     foreach ($schema as $table_name => $table_schema) {
       if (!$schema_handler->tableExists($table_name)) {
+//\Drupal::messenger()->addMessage('DEBUG 0 ' . print_r($table_schema, TRUE)); //+debug
         $schema_handler->createTable($table_name, $table_schema);
       }
     }
@@ -384,6 +385,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
 
     // Create entity tables.
     foreach ($schema as $table_name => $table_schema) {
+//\Drupal::messenger()->addMessage('DEBUG 1 ' . print_r($table_schema, TRUE)); //+debug
       $this->database->schema()->createTable($temporary_table_names[$table_name], $table_schema);
     }
 
@@ -395,6 +397,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
         // Filter out tables which are not part of the table mapping.
         $schema = array_intersect_key($schema, $temporary_table_names);
         foreach ($schema as $table_name => $table_schema) {
+//\Drupal::messenger()->addMessage('DEBUG 2 ' . print_r($table_schema, TRUE)); //+debug
           $this->database->schema()->createTable($temporary_table_names[$table_name], $table_schema);
         }
       }
@@ -656,6 +659,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
       // Create the dedicated field tables using "deleted" table names.
       foreach ($dedicated_table_field_schema as $name => $table) {
         if (!$this->database->schema()->tableExists($dedicated_table_name_mapping[$name])) {
+//\Drupal::messenger()->addMessage('DEBUG 3 ' . print_r($table, TRUE)); //+debug
           $this->database->schema()->createTable($dedicated_table_name_mapping[$name], $table);
         }
         else {
@@ -1470,6 +1474,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
         // Check if the table exists because it might already have been
         // created as part of the earlier entity type update event.
         if (!$this->database->schema()->tableExists($name)) {
+//\Drupal::messenger()->addMessage('DEBUG 4 ' . print_r($table, TRUE)); //+debug
           $this->database->schema()->createTable($name, $table);
         }
       }
@@ -1565,7 +1570,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
     $table_mapping = $this->getTableMapping($this->entityType, [$storage_definition]);
     $table_name = $table_mapping->getDedicatedDataTableName($storage_definition, $storage_definition->isDeleted());
     if ($this->database->schema()->tableExists($table_name)) {
-      $this->database->schema()->dropTable($table_name);
+      // $this->database->schema()->dropTable($table_name);
     }
     if ($this->entityType->isRevisionable()) {
       $revision_table_name = $table_mapping->getDedicatedRevisionTableName($storage_definition, $storage_definition->isDeleted());
@@ -2153,7 +2158,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
     $description_current = "Data storage for {$storage_definition->getTargetEntityTypeId()} field {$storage_definition->getName()}.";
     $description_revision = "Revision archive storage for {$storage_definition->getTargetEntityTypeId()} field {$storage_definition->getName()}.";
 
-\Drupal::messenger()->addMessage('DEBUG ChadoEntityStorageSchema::getDedicatedTableSchema ' . $storage_definition->getName() . ' for ' . $entity_type->getLabel()); //+debug
+//\Drupal::messenger()->addMessage('DEBUG ChadoEntityStorageSchema::getDedicatedTableSchema ' . $storage_definition->getName() . ' for ' . $entity_type->getLabel()); //+debug
     $id_definition = $this->fieldStorageDefinitions[$entity_type->getKey('id')];
     if ($id_definition->getType() == 'integer') {
       $id_schema = [
@@ -2239,8 +2244,10 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
 
     // Check that the schema does not include forbidden column names.
     $schema = $storage_definition->getSchema();
+//\Drupal::messenger()->addMessage('DEBUG 5 ' . print_r($schema, TRUE)); //+debug
     $properties = $storage_definition->getPropertyDefinitions();
     $table_mapping = $this->getTableMapping($entity_type, [$storage_definition]);
+//\Drupal::messenger()->addMessage('DEBUG 6 ' . print_r($table_mapping, TRUE)); //+debug
     if (array_intersect(array_keys($schema['columns']), $table_mapping->getReservedColumns())) {
       throw new FieldException("Illegal field column names on {$storage_definition->getName()}");
     }
@@ -2248,6 +2255,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
     // Add field columns.
     foreach ($schema['columns'] as $column_name => $attributes) {
       $real_name = $table_mapping->getFieldColumnName($storage_definition, $column_name);
+//\Drupal::messenger()->addMessage('DEBUG 7 ' . $column_name . '=' . $real_name); //+debug
       $data_schema['fields'][$real_name] = $attributes;
       // A dedicated table only contain rows for actual field values, and no
       // rows for entities where the field is empty. Thus, we can safely
