@@ -2,9 +2,6 @@ field.widget.settings.stockprop_widget_type:
   type: mapping
   label: 'Stock prop widget type widget settings'
   mapping:
-    size:
-      type: integer
-      label: 'Size'
     placeholder:
       type: textfield
       label: 'Placeholder'

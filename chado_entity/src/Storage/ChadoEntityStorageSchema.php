@@ -770,7 +770,11 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
     //+val
     // Add the entity_id column.
     // $select->addField('entity_table', $this->entityType->getKey('id'), 'entity_id');
-    $select->addField('entity_table', $this->entityType->getKey('id'), 'stock_id');
+    $stock_id = 'stock_id';
+    if (str_contains($table_name,'_relationship')) {
+      $stock_id = 'subject_id';
+    }
+    $select->addField('entity_table', $this->entityType->getKey('id'), $stock_id);
 
     // // Add the revision_id column.
     // if ($this->entityType->isRevisionable()) {
@@ -2158,7 +2162,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
     $description_current = "Data storage for {$storage_definition->getTargetEntityTypeId()} field {$storage_definition->getName()}.";
     $description_revision = "Revision archive storage for {$storage_definition->getTargetEntityTypeId()} field {$storage_definition->getName()}.";
 
-//\Drupal::messenger()->addMessage('DEBUG ChadoEntityStorageSchema::getDedicatedTableSchema ' . $storage_definition->getName() . ' for ' . $entity_type->getLabel()); //+debug
+// \Drupal::messenger()->addMessage('DEBUG ChadoEntityStorageSchema::getDedicatedTableSchema ' . $storage_definition->getProvider() . '/' . $storage_definition->getType() . ' for ' . $entity_type->getLabel()); //+debug
     $id_definition = $this->fieldStorageDefinitions[$entity_type->getKey('id')];
     if ($id_definition->getType() == 'integer') {
       $id_schema = [
@@ -2198,7 +2202,12 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
         'description' => 'The entity revision id this data is attached to',
       ];
     }
-
+$stock_id = 'stock_id';
+$primary_key = 'stock_id';
+if ($storage_definition->getType() == 'stock_reference') {
+  $stock_id = 'subject_id';
+  $primary_key = 'stock_relationship_id';
+}
     $data_schema = [
       'description' => $description_current,
       'fields' => [
@@ -2218,7 +2227,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
         //   'description' => 'A boolean indicating whether this data item has been deleted',
         // ],
         // 'entity_id' => $id_schema,
-        'stock_id' => $id_schema,
+        $stock_id => $id_schema,
         // 'revision_id' => $revision_id_schema,
         // 'langcode' => [
         //   'type' => 'varchar_ascii',
@@ -2235,7 +2244,7 @@ class ChadoEntityStorageSchema extends SqlContentEntityStorageSchema {
         // ],
       ],
       // 'primary key' => ['entity_id', 'deleted', 'delta', 'langcode'],
-      'primary key' => ['stock_id'],
+      'primary key' => [$primary_key],
       'indexes' => [
         // 'bundle' => ['bundle'],
         // 'revision_id' => ['revision_id'],

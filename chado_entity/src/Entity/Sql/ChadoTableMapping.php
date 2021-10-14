@@ -206,7 +206,6 @@ class ChadoTableMapping extends DefaultTableMapping {
 //      'revision_id',
 //      'langcode',
 //      'delta',
-      'stock_id',
     ];
     foreach ($dedicated_table_definitions as $field_name => $definition) {
 //\Drupal::messenger()->addMessage("DEBUG ChadoTableMapping::create field_name $field_name"); //+debug
@@ -214,11 +213,11 @@ class ChadoTableMapping extends DefaultTableMapping {
         $table_mapping
           ->getDedicatedDataTableName($definition),
       ];
-      if ($revisionable && $definition
-        ->isRevisionable()) {
-        $tables[] = $table_mapping
-          ->getDedicatedRevisionTableName($definition);
-      }
+      // if ($revisionable && $definition
+      //   ->isRevisionable()) {
+      //   $tables[] = $table_mapping
+      //     ->getDedicatedRevisionTableName($definition);
+      // }
       foreach ($tables as $table_name) {
         $table_mapping
           ->setFieldNames($table_name, [
@@ -240,28 +239,31 @@ class ChadoTableMapping extends DefaultTableMapping {
 // \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName field_name:' . $field_name, \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
 // \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName FSD:' . print_r($storage_definition, TRUE), \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
 
+// if ($storage_definition instanceof \Drupal\field\Entity\FieldStorageConfig) {
+// \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName module:' . $storage_definition->get('module'), \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
+// }
     // Check if it is a Chado field.
-    if (!is_a($storage_definition, \Drupal\field\Entity\FieldStorageConfig::class)
-        || ($storage_definition->get('module') != 'stockprop_field')
+    if (!($storage_definition instanceof \Drupal\field\Entity\FieldStorageConfig)
+        || (($storage_definition->get('module') != 'stockprop_field') && ($storage_definition->get('module') != 'stockref_field'))
     ) {
-//      \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName parent', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
+// \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName parent', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
       return parent::getFieldColumnName($storage_definition, $property_name);
     }
-//  \Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName module:' . $storage_definition->get('module'), \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
 
     $field_name = $storage_definition->getName();
 if ('entity_id' == $property_name) {
   return 'stock_id';
 }
+if (('stock_id' == $property_name) && ($storage_definition->get('module') == 'stockref_field')) {
+  return 'subject_id';
+}
 
     if ($this->allowsSharedTableStorage($storage_definition)) {
-//\Drupal::messenger()->addMessage('DEBUG 0', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
       $column_name = count($storage_definition->getColumns()) == 1 ? $field_name : $field_name . '__' . $property_name;
     }
     elseif ($this
       ->requiresDedicatedTableStorage($storage_definition)
     ) {
-//\Drupal::messenger()->addMessage('DEBUG 1', \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
       if ($property_name == TableMappingInterface::DELTA) {
         $column_name = 'delta';
       }
@@ -274,7 +276,6 @@ if ('entity_id' == $property_name) {
     else {
       throw new SqlContentEntityStorageException("Column information not available for the '{$field_name}' field.");
     }
-//\Drupal::messenger()->addMessage('DEBUG ChadoTableMapping::getFieldColumnName column_name:' . $column_name, \Drupal\Core\Messenger\MessengerInterface::TYPE_STATUS, TRUE); //+debug
     return $column_name;
   }
 }

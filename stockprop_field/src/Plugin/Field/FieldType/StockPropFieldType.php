@@ -137,38 +137,27 @@ class StockPropFieldType extends FieldItemBase {
   public function getConstraints() {
     $constraints = parent::getConstraints();
 
-    if ($max_length = $this->getSetting('max_length')) {
-      $constraint_manager = \Drupal::typedDataManager()->getValidationConstraintManager();
-      $constraints[] = $constraint_manager->create('ComplexData', [
-        'type_id' => [
-          'Range' => [
-            'min' => 0,
-            'minMessage' => t('%name: The type_id integer must be larger or equal to %min.', [
-              '%name' => $this->getFieldDefinition()->getLabel(),
-              '%min' => 0,
-            ]),
-          ],
+    $constraint_manager = \Drupal::typedDataManager()->getValidationConstraintManager();
+    $constraints[] = $constraint_manager->create('ComplexData', [
+      'type_id' => [
+        'Range' => [
+          'min' => 0,
+          'minMessage' => t('%name: The type_id integer must be larger or equal to %min.', [
+            '%name' => $this->getFieldDefinition()->getLabel(),
+            '%min' => 0,
+          ]),
         ],
-        'value' => [
-          'Length' => [
-            'max' => $max_length,
-            'maxMessage' => t('%name: may not be longer than @max characters.', [
-              '%name' => $this->getFieldDefinition()->getLabel(),
-              '@max' => $max_length
-            ]),
-          ],
+      ],
+      'rank' => [
+        'Range' => [
+          'min' => 0,
+          'minMessage' => t('%name: The rank integer must be larger or equal to %min.', [
+            '%name' => $this->getFieldDefinition()->getLabel(),
+            '%min' => 0,
+          ]),
         ],
-        'rank' => [
-          'Range' => [
-            'min' => 0,
-            'minMessage' => t('%name: The rank integer must be larger or equal to %min.', [
-              '%name' => $this->getFieldDefinition()->getLabel(),
-              '%min' => 0,
-            ]),
-          ],
-        ],
-      ]);
-    }
+      ],
+    ]);
 
     return $constraints;
   }

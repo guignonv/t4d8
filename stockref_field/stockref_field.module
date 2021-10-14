@@ -1,0 +1,54 @@
+<?php
+
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+
+
+/**
+ * @file
+ * An example field using the Field Types API.
+ */
+
+/**
+ * @defgroup chado_field Example: Field Types API
+ * @ingroup examples
+ * @{
+ * Examples using Field Types API.
+ *
+ * Providing a field requires:
+ * - Defining an entity field item. Entity field items are typed data objects
+ *   containing the field values.
+ *   - Drupal\chado_field\Plugin\Field\FieldType\RgbItem
+ * - Defining a field type schema at config/schema/[module_name].schema.yml
+ *   - config/schema/chado_field.schema.yml
+ * - One or more widgets specifying how the field appears in edit forms
+ *   - Drupal\chado_field\Plugin\Field\TextWidget
+ *   - Drupal\chado_field\Plugin\Field\Text3Widget
+ *   - Drupal\chado_field\Plugin\Field\ColorPickerWidgetWidget
+ * - One or more formatters specifying how the field appears in displayed
+ *   entities
+ *   - Drupal\chado_field\Plugin\FieldFormatter\SimpleTextFormatter
+ *   - Drupal\chado_field\Plugin\FieldFormatter\ColorBackgroundFormatter
+ *
+ * @see field_types
+ * @see field
+ * @see schemaapi
+ *
+ * @} End of "defgroup chado_field".
+ */
+
+/**
+ * Implements hook_entity_base_field_info().
+ */
+function stockref_field_entity_base_field_info(EntityTypeInterface $entity_type) {
+// echo "DEBUG 0: " . $entity_type->id() . "\n"; //+debug
+  if ($entity_type->id() === 'chado_entity') {
+    
+// echo "DEBUG 1\n"; //+debug
+    $fields['stockref'] = BaseFieldDefinition::create('stock_reference')
+      ->setLabel(t('Stockref'))
+      ->setComputed(TRUE);
+
+    return $fields;
+  }
+}

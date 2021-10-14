@@ -1085,13 +1085,18 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
     foreach ($storage_definitions as $field_name => $storage_definition) {
       $table = !$load_from_revision ? $table_mapping->getDedicatedDataTableName($storage_definition) : $table_mapping->getDedicatedRevisionTableName($storage_definition);
 
+      $stock_id = 'stock_id';
+      if (str_contains($table,'_relationship')) {
+        $stock_id = 'subject_id';
+      }
+
       // Ensure that only values having valid languages are retrieved. Since we
       // are loading values for multiple entities, we cannot limit the query to
       // the available translations.
       $results = $this->database->select($table, 't')
         ->fields('t')
         //+val ->condition(!$load_from_revision ? 'entity_id' : 'revision_id', $ids, 'IN')
-        ->condition('stock_id', $ids, 'IN')
+        ->condition($stock_id, $ids, 'IN')
         // ->condition('deleted', 0)
         // ->condition('langcode', $langcodes, 'IN')
         // ->orderBy('delta')
@@ -1101,7 +1106,8 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
         $bundle = 'chado_entity'; //+val $row->bundle;
 
         //+val $value_key = !$load_from_revision ? $row->entity_id : $row->revision_id;
-        $value_key = $row->stock_id;
+        $value_key = $row->$stock_id;
+
         // Field values in default language are stored with
         // LanguageInterface::LANGCODE_DEFAULT as key.
         $langcode = LanguageInterface::LANGCODE_DEFAULT;
@@ -1126,7 +1132,6 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
               // Unserialize the value if specified in the column schema.
               $item[$column] = (!empty($attributes['serialize'])) ? unserialize($row->$column_name) : $row->$column_name;
             }
-
             // Add the item to the field values for the entity.
             $values[$value_key][$field_name][$langcode][] = $item;
           }
@@ -1181,17 +1186,23 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
 
       $table_name = $table_mapping->getDedicatedDataTableName($storage_definition);
       $revision_name = $table_mapping->getDedicatedRevisionTableName($storage_definition);
+      $stock_id = 'stock_id';
+\Drupal::messenger()->addMessage('DEBUG 1: ' . $field_name); //+debug
+      if (str_contains($field_name, '_relationship')) {
+        $stock_id = 'subject_id';
+      }
 
       // Delete and insert, rather than update, in case a value was added.
       if ($update) {
         // Only overwrite the field's base table if saving the default revision
         // of an entity.
-        if ($entity->isDefaultRevision()) {
-          $this->database->delete($table_name)
-            //+val ->condition('entity_id', $id)
-            ->condition('stock_id', $id)
-            ->execute();
-        }
+//@todo: delete sur plus de conditions!
+        // if ($entity->isDefaultRevision()) {
+        //   $this->database->delete($table_name)
+        //     //+val ->condition('entity_id', $id)
+        //     ->condition($stock_id, $id)
+        //     ->execute();
+        // }
         // if ($this->entityType->isRevisionable()) {
         //   $this->database->delete($revision_name)
         //     //+val ->condition('entity_id', $id)
@@ -1204,15 +1215,20 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
       // Prepare the multi-insert query.
       $do_insert = FALSE;
       // $columns = ['entity_id', 'revision_id', 'bundle', 'delta', 'langcode'];
-      $columns = ['stock_id'];
+if (!str_contains($field_name, '_relationship')) {
+  $columns = [$stock_id];
+}
       foreach ($storage_definition->getColumns() as $column => $attributes) {
         $columns[] = $table_mapping->getFieldColumnName($storage_definition, $column);
       }
+// Remove column that is auto-incremented for relationships.
+$columns = array_values(array_filter($columns, function ($c) { return !str_contains($c, '_relationship_id');}));
+
       $query = $this->database->insert($table_name)->fields($columns);
       // if ($this->entityType->isRevisionable()) {
       //   $revision_query = $this->database->insert($revision_name)->fields($columns);
       // }
-
+// \Drupal::messenger()->addMessage('DEBUG 2: ' . $id); //+debug
       $langcodes = $field_definition->isTranslatable() ? $translation_langcodes : [$default_langcode];
       foreach ($langcodes as $langcode) {
         $delta_count = 0;
@@ -1222,7 +1238,7 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
           // We now know we have something to insert.
           $do_insert = TRUE;
           $record = [
-            'stock_id' => $id,
+            $stock_id => $id,
             //+val
             // 'entity_id' => $id,
             // 'revision_id' => $vid,
@@ -1231,14 +1247,24 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
             // 'langcode' => $langcode,
           ];
           foreach ($storage_definition->getColumns() as $column => $attributes) {
+// Skip auto-incremented column for relationships.
+if (str_contains($column, '_relationship_id')) {
+  continue;
+}
             $column_name = $table_mapping->getFieldColumnName($storage_definition, $column);
             // Serialize the value if specified in the column schema.
             $value = $item->$column;
+if ($column == 'subject_id') {
+  $value = $id;
+}
+\Drupal::messenger()->addMessage('DEBUG 3: ' . $column . ' = ' . $value); //+debug
+
             if (!empty($attributes['serialize'])) {
               $value = serialize($value);
             }
             $record[$column_name] = SqlContentEntityStorageSchema::castValue($attributes, $value);
           }
+\Drupal::messenger()->addMessage('DEBUG 4: ' . print_r($record, TRUE)); //+debug
           $query->values($record);
           // if ($this->entityType->isRevisionable()) {
           //   $revision_query->values($record);
@@ -1254,6 +1280,12 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
       if ($do_insert) {
         // Only overwrite the field's base table if saving the default revision
         // of an entity.
+$inspect = function () {
+  \Drupal::messenger()->addMessage('DEBUG 4a: ' . print_r($this->insertFields, TRUE)); //+debug
+  \Drupal::messenger()->addMessage('DEBUG 4b: ' . print_r($this->insertValues, TRUE)); //+debug
+};
+$inspect->call($query);
+// \Drupal::messenger()->addMessage('DEBUG 4: ' . print_r($query, TRUE)); //+debug
         if ($entity->isDefaultRevision()) {
           $query->execute();
         }
@@ -1278,9 +1310,15 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
       }
       $table_name = $table_mapping->getDedicatedDataTableName($storage_definition);
       $revision_name = $table_mapping->getDedicatedRevisionTableName($storage_definition);
+      $stock_id = 'stock_id';
+\Drupal::messenger()->addMessage('DEBUG 1: ' . print_r($storage_definition, TRUE)); //+debug
+      // if (str_contains($field_name,'_relationship')) {
+      //   $stock_id = 'subject_id';
+      // }
+
       $this->database->delete($table_name)
         //+val ->condition('entity_id', $entity->id())
-        ->condition('stock_id', $entity->id())
+        ->condition($stock_id, $entity->id())
         ->execute();
       // if ($this->entityType->isRevisionable()) {
       //   $this->database->delete($revision_name)
@@ -1305,9 +1343,14 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
         if (!$table_mapping->requiresDedicatedTableStorage($storage_definition)) {
           continue;
         }
+        $stock_id = 'stock_id';
+\Drupal::messenger()->addMessage('DEBUG 2: ' . print_r($storage_definition, TRUE)); //+debug
+        // if (str_contains($field_name,'_relationship')) {
+        //   $stock_id = 'subject_id';
+        // }
         $revision_name = $table_mapping->getDedicatedRevisionTableName($storage_definition);
         $this->database->delete($revision_name)
-          ->condition('stock_id', $entity->id())
+          ->condition($stock_id, $entity->id())
           //+val ->condition('entity_id', $entity->id())
           //+val ->condition('revision_id', $vid)
           ->execute();
@@ -1517,10 +1560,15 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
     foreach ($storage_definition->getColumns() as $column_name => $data) {
       $or->isNotNull($table_mapping->getFieldColumnName($storage_definition, $column_name));
     }
+      $stock_id = 'stock_id';
+\Drupal::messenger()->addMessage('DEBUG 3: ' . print_r($field_definition, TRUE)); //+debug
+      // if (str_contains($field_name,'_relationship')) {
+      //   $stock_id = 'subject_id';
+      // }
     $entity_query
       ->distinct(TRUE)
       //+val ->fields('t', ['entity_id'])
-      ->fields('t', ['stock_id'])
+      ->fields('t', [$stock_id])
       // ->condition('bundle', $field_definition->getTargetBundle())
       ->range(0, $batch_size);
 
@@ -1535,7 +1583,7 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
     foreach ($entity_query->execute() as $row) {
       $item_query = $this->database->select($table_name, 't', ['fetch' => \PDO::FETCH_ASSOC])
         ->fields('t')
-        ->condition('stock_id', $row['stock_id'])
+        ->condition($stock_id, $row[$stock_id])
         //+val
         // ->condition('entity_id', $row['entity_id'])
         // ->condition('deleted', 1)
@@ -1620,10 +1668,16 @@ class ChadoEntityStorage extends SqlContentEntityStorage {
         $or->isNotNull($table_mapping->getFieldColumnName($storage_definition, $column_name));
       }
       $query->condition($or);
+      $stock_id = 'stock_id';
+\Drupal::messenger()->addMessage('DEBUG 3: ' . print_r($storage_definition, TRUE)); //+debug
+      // if (str_contains($field_name,'_relationship')) {
+      //   $stock_id = 'subject_id';
+      // }
+
       if (!$as_bool) {
         $query
           //+val ->fields('t', ['entity_id'])
-          ->fields('t', ['stock_id'])
+          ->fields('t', [$stock_id])
           ->distinct(TRUE);
       }
     }

@@ -1,0 +1,7 @@
+field.widget.settings.stockref_widget_type:
+  type: mapping
+  label: 'Stock ref widget type widget settings'
+  mapping:
+    placeholder:
+      type: textfield
+      label: 'Placeholder'
