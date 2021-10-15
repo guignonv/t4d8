@@ -1312,9 +1312,9 @@ $inspect->call($query);
       $revision_name = $table_mapping->getDedicatedRevisionTableName($storage_definition);
       $stock_id = 'stock_id';
 \Drupal::messenger()->addMessage('DEBUG 1: ' . print_r($storage_definition, TRUE)); //+debug
-      // if (str_contains($field_name,'_relationship')) {
-      //   $stock_id = 'subject_id';
-      // }
+      if (str_contains($storage_definition->getName(), '_relationship')) {
+        $stock_id = 'subject_id';
+      }
 
       $this->database->delete($table_name)
         //+val ->condition('entity_id', $entity->id())
@@ -1345,9 +1345,9 @@ $inspect->call($query);
         }
         $stock_id = 'stock_id';
 \Drupal::messenger()->addMessage('DEBUG 2: ' . print_r($storage_definition, TRUE)); //+debug
-        // if (str_contains($field_name,'_relationship')) {
-        //   $stock_id = 'subject_id';
-        // }
+        if (str_contains($storage_definition->getName(), '_relationship')) {
+          $stock_id = 'subject_id';
+        }
         $revision_name = $table_mapping->getDedicatedRevisionTableName($storage_definition);
         $this->database->delete($revision_name)
           ->condition($stock_id, $entity->id())
@@ -1562,9 +1562,9 @@ $inspect->call($query);
     }
       $stock_id = 'stock_id';
 \Drupal::messenger()->addMessage('DEBUG 3: ' . print_r($field_definition, TRUE)); //+debug
-      // if (str_contains($field_name,'_relationship')) {
-      //   $stock_id = 'subject_id';
-      // }
+    if (str_contains($field_definition->getName(),'_relationship')) {
+      $stock_id = 'subject_id';
+    }
     $entity_query
       ->distinct(TRUE)
       //+val ->fields('t', ['entity_id'])
@@ -1670,9 +1670,9 @@ $inspect->call($query);
       $query->condition($or);
       $stock_id = 'stock_id';
 \Drupal::messenger()->addMessage('DEBUG 3: ' . print_r($storage_definition, TRUE)); //+debug
-      // if (str_contains($field_name,'_relationship')) {
-      //   $stock_id = 'subject_id';
-      // }
+      if (str_contains($storage_definition->getName(), '_relationship')) {
+        $stock_id = 'subject_id';
+      }
 
       if (!$as_bool) {
         $query
