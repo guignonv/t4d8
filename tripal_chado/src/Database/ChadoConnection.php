@@ -21,7 +21,7 @@ use Drupal\tripal_chado\Database\ChadoSchema;
  *
  * @code
  * $chado = new \Drupal\tripal_chado\Database\ChadoConnection();
- * $parameters = ['format' => 'Drupal'];
+ * $parameters = ['format' => 'drupal'];
  * $table_schema = $chado->schema()->getTableDef($table_name, $parameters);
  * @endcode
  *
@@ -349,6 +349,41 @@ class ChadoConnection extends BioConnection {
       }
     }
     return $chado_schemas;
+  }
+
+  /**
+   * Removes all existing Chado test schemas.
+   *
+   * Use this function when tests schemas were not removed properly by the
+   * automated test system.
+   *
+   * Usage:
+   *   \Drupal\tripal_chado\Database\ChadoConnection::removeAllTestSchemas();
+   */
+  public static function removeAllTestSchemas() :void {
+    // Get Chado test schema prefix.
+    $test_schema = \Drupal::config('tripal_biodb.settings')
+      ->get('test_schema_base_names', [])['chado']
+    ;
+    // Remove all matching schemas.
+    $db = \Drupal::database();
+    $schemas = $db->query(
+      "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE '$test_schema%';"
+    );
+    $dropped = [];
+    foreach ($schemas as $schema) {
+      try {
+        $schema_name = $schema->schema_name;
+        $db->query("DROP SCHEMA \"$schema_name\" CASCADE;");
+        $dropped[] = $schema_name;
+      }
+      catch (\Drupal\Core\Database\DatabaseException $e) {
+        // ignore errors.
+      }
+    }
+    \Drupal::logger('tripal_chado')->notice(
+      "Removed test schemas: " . implode(', ', $dropped)
+    );
   }
 
 }

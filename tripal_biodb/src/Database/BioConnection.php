@@ -46,6 +46,14 @@ use Drupal\tripal_biodb\Exception\ConnectionException;
 abstract class BioConnection extends PgConnection {
 
   /**
+   * {@inheritdoc}
+   */
+  protected $identifierQuotes = [
+    '"',
+    '"',
+  ];
+
+  /**
    * Class lineage to use when checking who called a method.
    *
    * @var array
@@ -53,13 +61,30 @@ abstract class BioConnection extends PgConnection {
   protected $self_classes = [
     \Drupal\Core\Database\Connection::class => TRUE,
     \Drupal\Core\Database\Driver\pgsql\Connection::class => TRUE,
+    \Drupal\pgsql\Driver\Database\pgsql\Connection::class => TRUE,
     \Drupal\tripal_biodb\Database\BioConnection::class => TRUE,
+  ];
+
+  /**
+   * Supported Connection classes.
+   * These must inherit from \Drupal\Core\Database\Connection
+   *
+   * NOTE: These are in order of preference with the first entry available
+   *  being used to open new connections.
+   * NOTE: the pgsql driver changed namespace in 9.4.x
+   *  Drupal\Core\Database\Driver\pgsql\Connection => Drupal\pgsql\Driver\Database\pgsql\Connection
+   *
+   * @var array
+   */
+  protected static $supported_classes = [
+    'Drupal\pgsql\Driver\Database\pgsql\Connection',
+    'Drupal\Core\Database\Driver\pgsql\Connection'
   ];
 
   /**
    * Database connection.
    *
-   * @var \Drupal\Core\Database\Driver\pgsql\Connection
+   * @var \Drupal\Core\Database\Connection
    */
   protected $database = NULL;
 
@@ -68,14 +93,14 @@ abstract class BioConnection extends PgConnection {
    *
    * @var string
    */
-  protected string $databaseName = '';
+  protected $databaseName = '';
 
   /**
    * Drupal settings database key.
    *
    * @var string
    */
-  protected string $dbKey = '';
+  protected $dbKey = '';
 
 
   /**
@@ -83,28 +108,28 @@ abstract class BioConnection extends PgConnection {
    *
    * @var string
    */
-  protected string $schemaName = '';
+  protected $schemaName = '';
 
   /**
    * The PostgreSQL quoted name of the biological schema used by this instance.
    *
    * @var string
    */
-  protected string $quotedSchemaName = '';
+  protected $quotedSchemaName = '';
 
   /**
    * An ordered list of extra schema that can be used.
    *
    * @var array
    */
-  protected array $extraSchemas = [];
+  protected $extraSchemas = [];
 
   /**
    * The version for current biological schema instance.
    *
    * @var ?string
    */
-  protected ?string $version = NULL;
+  protected $version = NULL;
 
   /**
    * Logger.
@@ -125,14 +150,14 @@ abstract class BioConnection extends PgConnection {
    *
    * @var array
    */
-  protected array $objectsUsingBioDb = [];
+  protected $objectsUsingBioDb = [];
 
   /**
    * List of classes that will use biological schema as default.
    *
    * @var array
    */
-  protected array $classesUsingBioDb = [];
+  protected $classesUsingBioDb = [];
 
   /**
    * Returns the version number of the given biological schema.
@@ -186,14 +211,14 @@ abstract class BioConnection extends PgConnection {
    * To not mess up with Drupal stuff, we need to open a new and distinct
    * database connection for each BioConnection instance.
    *
-   * @param \Drupal\Core\Database\Driver\pgsql\Connection $database
+   * @param \Drupal\Core\Database\Connection $database
    *   The database connection to duplicate.
    *
    * @return \PDO
    *   A \PDO object.
    */
   protected static function openNewPdoConnection(
-    \Drupal\Core\Database\Driver\pgsql\Connection $database
+    \Drupal\Core\Database\Connection $database
   ) {
     // We call this method in a context of an existing connection already
     // used by Drupal so we can avoid a couple of tests and assume it works.
@@ -201,7 +226,14 @@ abstract class BioConnection extends PgConnection {
     $target = $database->target;
     $key = $database->key;
 
-    $pdo_connection = \Drupal\Core\Database\Driver\pgsql\Connection::open(
+    // Open a new connection with the first supported connection available.
+    $database_class = NULL;
+    array_walk(self::$supported_classes, function($class_name) use(&$database_class) {
+      if (class_exists($class_name) AND is_null($database_class)) {
+        $database_class = $class_name;
+      }
+    });
+    $pdo_connection = $database_class::open(
       $database_info[$key][$target]
     );
     return $pdo_connection;
@@ -215,8 +247,8 @@ abstract class BioConnection extends PgConnection {
    *   Default: '' (no schema). It will throw exceptions on methods needing a
    *   default schema but may work on others or when a schema can be passed
    *   as parameter.
-   * @param \Drupal\Core\Database\Driver\pgsql\Connection|string $database
-   *   Either a \Drupal\Core\Database\Driver\pgsql\Connection instance or a
+   * @param \Drupal\Core\Database\Connection|string $database
+   *   Either a \Drupal\Core\Database\Connection instance or a
    *   Drupal database key string (from current site's settings.php).
    *   Extra databases specified in settings.php do not need to specify a
    *   schema name as a database prefix parameter. The prefix will be managed by
@@ -249,12 +281,18 @@ abstract class BioConnection extends PgConnection {
         $database
       );
     }
-    // Make sure we are using a PostgreSQL connection.
-    if (!is_a($database, \Drupal\Core\Database\Driver\pgsql\Connection::class)
-    ) {
-      throw new ConnectionException(
-        "The provided connection object is not a PostgreSQL database connection."
-      );
+
+
+    // Make sure we are using a supported connection.
+    if (is_object($database)) {
+      $database_class = get_class($database);
+      if (!in_array($database_class, self::$supported_classes)) {
+        throw new ConnectionException("The provided connection object is not a PostgreSQL database connection but is instead from $database_class.");
+      }
+    }
+    else {
+      $type = gettype($database);
+      throw new ConnectionException("We expected a PostgreSQL database connection or Drupal database key string but instead recieved a $type.");
     }
 
     // Get a BioDbTool object.
@@ -272,7 +310,19 @@ abstract class BioConnection extends PgConnection {
       // he/she wants to do and we won't change those.
       // Note: if the schema name is not valid, an exception will be thrown by
       // setSchemaName() at the end of this constructor.
-      $connection_options['prefix']['1'] = $schema_name . '.';
+      if (empty($connection_options['prefix'])) {
+        $connection_options['prefix'] = ['1' => $schema_name . '.'];
+      }
+      elseif (is_array($connection_options['prefix'])) {
+        $connection_options['prefix']['1'] = $schema_name . '.';
+      }
+      else {
+        // $this->prefixes is a string.
+        $connection_options['prefix'] = [
+          'default' => $connection_options['prefix'],
+          '1' => $schema_name . '.',
+        ];
+      }
       // Add search_path to avoid the use of Drupal schema by mistake.
       // Get biological schema name first.
       $sql =
@@ -418,7 +468,19 @@ abstract class BioConnection extends PgConnection {
 
     // Update schema prefixes.
     $bioschema_prefix = empty($schema_name) ? '' : $schema_name . '.';
-    $this->prefixes['1'] = $bioschema_prefix;
+    if (empty($this->prefixes)) {
+      $this->prefixes = ['1' => $bioschema_prefix];
+    }
+    elseif (is_array($this->prefixes)) {
+      $this->prefixes['1'] = $bioschema_prefix;
+    }
+    else {
+      // $this->prefixes is a string.
+      $this->prefixes = [
+        'default' => $this->prefixes,
+        '1' => $bioschema_prefix,
+      ];
+    }
     $this->setPrefix($this->prefixes);
 
     // Update search_path.
@@ -800,8 +862,6 @@ abstract class BioConnection extends PgConnection {
         $this->prefixes['default']
       )
     ;
-    $this->prefixSearch[] = '}';
-    $this->prefixReplace[] = $end_quote;
 
     if (!empty($this->schemaName)) {
       $this->prefixSearch[] = '{1:';
@@ -890,12 +950,17 @@ abstract class BioConnection extends PgConnection {
     if (preg_match_all('/\{(\d+):/', $sql, $matches)) {
       $max_index = array_key_last($this->extraSchemas) ?? 1;
       foreach ($matches[1] as $index) {
-        if ($index > $max_index) {
+        if (($index > $max_index)
+            && (!array_key_exists("$index", $this->prefixes))
+        ) {
           throw new ConnectionException(
             "Invalid extra schema specification '$index' in statement:\n$sql\nMaximum schema index is currently $max_index."
           );
         }
-        elseif ((1 == $index) && empty($this->schemaName)) {
+        elseif ((1 == $index)
+          && empty($this->schemaName)
+          && (!array_key_exists('1', $this->prefixes))
+        ) {
           throw new ConnectionException(
             "No main biological schema set for current connection while it has been referenced in the SQL statement:\n$sql."
           );

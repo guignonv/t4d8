@@ -40,9 +40,9 @@ class BioDbTool {
   /**
    * Reserved schema name patterns.
    *
-   * @var array
+   * @var ?array
    */
-  protected static ?array $reservedSchemaPatterns;
+  protected static $reservedSchemaPatterns;
 
   /**
    * Get Drupal schema name.
@@ -361,7 +361,7 @@ class BioDbTool {
     string $object_id,
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :string {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
     $sql = "SELECT quote_ident(:object_id) AS \"qi\";";
     $quoted_object_id = $db
       ->query($sql, [':object_id' => $object_id])
@@ -396,7 +396,7 @@ class BioDbTool {
     string $schema_name,
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :bool {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
 
     // First make sure we have a valid schema name.
     $bio_tool = \Drupal::service('tripal_biodb.tool');
@@ -445,7 +445,7 @@ class BioDbTool {
     string $schema_name,
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :void {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
     $bio_tool = \Drupal::service('tripal_biodb.tool');
     $schema_name_quoted = $bio_tool->quoteDbObjectId($schema_name);
     // Create schema.
@@ -481,7 +481,7 @@ class BioDbTool {
     string $target_schema,
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :void {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
 
     // Clone schema.
     $bio_tool = \Drupal::service('tripal_biodb.tool');
@@ -524,7 +524,7 @@ class BioDbTool {
     string $new_schema_name,
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :void {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
 
     // Quote schema names if needed.
     $bio_tool = \Drupal::service('tripal_biodb.tool');
@@ -563,7 +563,7 @@ class BioDbTool {
     string $schema_name,
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :void {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
     $bio_tool = \Drupal::service('tripal_biodb.tool');
     $schema_name_quoted = $bio_tool->quoteDbObjectId($schema_name);
     // Drop schema.
@@ -595,7 +595,7 @@ class BioDbTool {
     string $schema_name,
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :int {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
 
     $schema_size = 0;
     $sql_query = "
@@ -636,7 +636,7 @@ class BioDbTool {
   public function getDatabaseSize(
     ?\Drupal\Core\Database\Driver\pgsql\Connection $db = NULL
   ) :int {
-    $db ??= \Drupal::database();
+    $db = $db ?? \Drupal::database();
     $db_size = 0;
     $sql_query = '
       SELECT pg_catalog.pg_database_size(d.datname) AS "size"
@@ -665,7 +665,7 @@ class BioDbTool {
    *       <column name> => [
    *        'type'     => <PostgreSQL column type>,
    *        'not null' => <TRUE if column cannot be NULL, FALSE otherwise>,
-   *        'default'  => <'DEFAULT ' followed by column default value>,
+   *        'default'  => <column default value or NULL for no default>,
    *       ],
    *       ...
    *     ],
@@ -763,7 +763,9 @@ class BioDbTool {
             for ($j = 0; $j < count($table_columns); ++$j) {
               $tcol = $table_columns[$j];
               $ftcol = $foreign_table_columns[$j];
-              $table_definition['dependencies'][$foreign_table] ??= [];
+              $table_definition['dependencies'][$foreign_table] =
+                $table_definition['dependencies'][$foreign_table]
+                ?? [];
               $table_definition['dependencies'][$foreign_table][$tcol] = $ftcol;
             }
           }
@@ -780,7 +782,10 @@ class BioDbTool {
         $table_definition['columns'][$match[1]] = [
           'type'     => $match[2],
           'not null' => (FALSE !== stripos($match[3], 'NOT')),
-          'default'  => preg_replace('/(?:^\s+DEFAULT\s+)|(?:\s+$)/', '', $match[4]),
+          'default'  => ($match[4] === '')
+            ? NULL
+            : preg_replace('/(?:^\s+DEFAULT\s+)|(?:\s+$)/', '', $match[4])
+          ,
         ];
       }
       else {
@@ -833,7 +838,7 @@ class BioDbTool {
         }
         elseif (
           preg_match(
-            '/^\s*COMMENT\s+ON\s+TABLE\s+\S+\s+IS\s+\'((?:[^\'\\\\]|\\\\.)*)(\'\s*;\s*|)$/i',
+            '/^\s*COMMENT\s+ON\s+TABLE\s+\S+\s+IS\s+\'((?:[^\'\\\\]|\\\\.|\'\')*)(\'\s*;\s*|)$/i',
             $table_raw_definition[$i],
             $match
           )
@@ -878,6 +883,9 @@ class BioDbTool {
    *
    * @return array
    *   An array with details of the table reflecting what is in database.
+   *
+   * @see https://www.drupal.org/docs/7/api/schema-api/data-types/data-types-overview
+   * @see https://api.drupal.org/api/drupal/core!lib!Drupal!Core!Database!database.api.php/group/schemaapi/9.3.x
    */
   public function parseTableDdlToDrupal(string $table_ddl) :array {
     $bio_tool = \Drupal::service('tripal_biodb.tool');
@@ -895,9 +903,13 @@ class BioDbTool {
     foreach ($table_structure['columns'] as $column => $column_def) {
       $column_def['type'] = trim($column_def['type']);
       $size = NULL;
+      $is_int = FALSE;
+      $is_float = FALSE;
       // Check for serial.
-      if (preg_match('/^nextval\(/i', $column_def['default'])) {
-        $column_def['default'] = '';
+      if (isset($column_def['default'])
+          && preg_match('/^nextval\(/i', $column_def['default'])
+      ) {
+        unset($column_def['default']);
         if ($column_def['type'] == 'bigint') {
           $column_def['type'] = 'bigserial';
           $size = 'big';
@@ -951,18 +963,27 @@ class BioDbTool {
           $column_type = 'int';
           $pg_type = $column_def['type'];
           $size = 'big';
+          $is_int = TRUE;
+          break;
+
+        case 'int':
+        case 'integer':
+          $column_type = 'int';
+          $pg_type = $column_def['type'];
+          $size = 'medium';
+          $is_int = TRUE;
           break;
 
         case 'smallint':
           $column_type = 'int';
           $pg_type = $column_def['type'];
           $size = 'small';
+          $is_int = TRUE;
           break;
 
         case 'boolean':
-          $column_type = 'int';
+          $column_type = 'text';
           $pg_type = $column_def['type'];
-          $size = 'tiny';
           break;
 
         case 'decimal':
@@ -970,23 +991,41 @@ class BioDbTool {
           $pg_type = $column_def['type'];
           $precision = $length;
           $length = NULL;
+          $is_float = TRUE;
           break;
 
         case 'real':
           $column_type = 'float';
           $pg_type = $column_def['type'];
+          $is_float = TRUE;
           break;
 
         case 'double':
           $column_type = 'float';
           $pg_type = $column_def['type'];
           $size = 'big';
+          $is_float = TRUE;
           break;
 
-        case 'smallserial':
         case 'bigserial':
           $column_type = 'serial';
           $pg_type = $column_def['type'];
+          $size = 'big';
+          $is_int = TRUE;
+          break;
+
+        case 'serial':
+          $column_type = 'serial';
+          $pg_type = $column_def['type'];
+          $size = 'medium';
+          $is_int = TRUE;
+          break;
+
+        case 'smallserial':
+          $column_type = 'serial';
+          $pg_type = $column_def['type'];
+          $size = 'small';
+          $is_int = TRUE;
           break;
 
         case 'character':
@@ -1018,20 +1057,28 @@ class BioDbTool {
       if (!empty($pg_type)) {
         $table_def['fields'][$column]['pgsql_type'] = $pg_type;
       }
-      if (!empty($length)) {
+      if (isset($length)) {
         $table_def['fields'][$column]['length'] = $length;
       }
-      if (!empty($size)) {
+      if (isset($size)) {
         $table_def['fields'][$column]['size'] = $size;
       }
-      if (!empty($precision)) {
+      if (isset($precision)) {
         $table_def['fields'][$column]['precision'] = $precision;
       }
-      if (!empty($scale)) {
+      if (isset($scale)) {
         $table_def['fields'][$column]['scale'] = $scale;
       }
-      if (!empty($column_def['default'])) {
-        $table_def['fields'][$column]['default'] = $column_def['default'];
+      if (isset($column_def['default'])) {
+        if ($is_int) {
+          $table_def['fields'][$column]['default'] = (int) $column_def['default'];
+        }
+        elseif ($is_float) {
+          $table_def['fields'][$column]['default'] = (float) $column_def['default'];
+        }
+        else {
+          $table_def['fields'][$column]['default'] = $column_def['default'];
+        }
       }
     }
 

@@ -17,6 +17,11 @@ use Drupal\tripal_biodb\Database\BioDbTool;
 class BioDbToolFunctionalTest extends KernelTestBase {
 
   /**
+   * {@inheritdoc}
+   */
+  protected static $modules = ['tripal_biodb'];
+
+  /**
    * List of tested schemas.
    *
    * Keys are schema names and values are boolean. At test shutdown, when the
@@ -29,13 +34,13 @@ class BioDbToolFunctionalTest extends KernelTestBase {
    *
    * @var array
    */
-  protected static array $testSchemas = [];
+  protected static $testSchemas = [];
 
   /**
    * A database connection.
    *
    * It should be set if not set in any test function that adds schema names to
-   * $testSchemas: `self::$db ??= \Drupal::database();`
+   * $testSchemas: `self::$db = self::$db ?? \Drupal::database();`
    *
    * @var \Drupal\Core\Database\Driver\pgsql\Connection
    */
@@ -90,9 +95,6 @@ class BioDbToolFunctionalTest extends KernelTestBase {
       ->get('test_schema_base_names')
       ?? ['default' => '_test_biodb', ]
     ;
-
-    // Register BioDbTool service.
-    $this->enableModules(['tripal_biodb']);
 
     // Mock the Config object.
     $this->proConfig = $this->prophesize(\Drupal\Core\Config\ImmutableConfig::class);
@@ -210,7 +212,7 @@ class BioDbToolFunctionalTest extends KernelTestBase {
 
     $bio_tool = new BioDbTool();
     $db = \Drupal::database();
-    self::$db ??= $db;
+    self::$db = self::$db ?? $db;
 
     // Clear all reserved patterns.
     $bio_tool->freeSchemaPattern('.*', TRUE);

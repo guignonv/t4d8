@@ -20,6 +20,11 @@ use Drupal\tripal_biodb\Database\BioConnection;
 class BioSchemaTest extends KernelTestBase {
 
   /**
+   * {@inheritdoc}
+   */
+  protected static $modules = ['tripal_biodb'];
+
+  /**
    * List of tested schemas.
    *
    * Keys are schema names and values are boolean. At test shutdown, when the
@@ -32,13 +37,13 @@ class BioSchemaTest extends KernelTestBase {
    *
    * @var array
    */
-  protected static array $testSchemas = [];
+  protected static $testSchemas = [];
 
   /**
    * A database connection.
    *
    * It should be set if not set in any test function that adds schema names to
-   * $testSchemas: `self::$db ??= \Drupal::database();`
+   * $testSchemas: `self::$db = self::$db ?? \Drupal::database();`
    *
    * @var \Drupal\Core\Database\Driver\pgsql\Connection
    */
@@ -93,9 +98,6 @@ class BioSchemaTest extends KernelTestBase {
       ->get('test_schema_base_names')
       ?? ['default' => '_test_biodb', ]
     ;
-
-    // Register BioDbTool service.
-    $this->enableModules(['tripal_biodb']);
 
     // Mock the Config object.
     $this->proConfig = $this->prophesize(\Drupal\Core\Config\ImmutableConfig::class);
@@ -256,7 +258,7 @@ class BioSchemaTest extends KernelTestBase {
    */
   public function testBioSchemaScenario1() {
     $db = \Drupal::database();
-    self::$db ??= $db;
+    self::$db = self::$db ?? $db;
     $this->allowTestSchemas();
     $test_schema_base_names = \Drupal::config('tripal_biodb.settings')
       ->get('test_schema_base_names')
@@ -290,7 +292,7 @@ class BioSchemaTest extends KernelTestBase {
     $this->assertLessThan(1000, $init_size, 'New schema empty.');
     
     // Load test data fixture into test schema.
-    $success = $biodb->executeSqlFile(__DIR__ . '/../../../fixtures/test_schema.sql', TRUE);
+    $success = $biodb->executeSqlFile(__DIR__ . '/../../../fixtures/test_schema.sql', 'none');
     $this->assertTrue($success, 'Schema test data loaded.');
 
     // Get new size.
@@ -546,9 +548,9 @@ class BioSchemaTest extends KernelTestBase {
   CONSTRAINT testtable_c1 UNIQUE (fieldbigint, fieldsmallint),
   CONSTRAINT testtable_foreign_id_fkey FOREIGN KEY (foreign_id) REFERENCES othertesttable(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED
 );
-CREATE UNIQUE INDEX testtable_c1 ON $test_schema.testtable USING btree (fieldbigint, fieldsmallint);
-CREATE UNIQUE INDEX testtable_c2 ON $test_schema.testtable USING btree (fieldbigint, fieldsmallint);
 CREATE INDEX testtable_idx1 ON $test_schema.testtable USING btree (foreign_id);
+CREATE UNIQUE INDEX testtable_c2 ON $test_schema.testtable USING btree (fieldbigint, fieldsmallint);
+CREATE UNIQUE INDEX testtable_c1 ON $test_schema.testtable USING btree (fieldbigint, fieldsmallint);
 COMMENT ON TABLE $test_schema.testtable IS 'Some long description
 on multiple lines.';
 ";
